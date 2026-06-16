@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Для Анечки ☁</title>
 <meta name="robots" content="noindex, nofollow">
-<meta name="theme-color" content="#05060a">
+<meta name="theme-color" content="#5d5188">
 <meta name="description" content="">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%98%81%EF%B8%8F%3C/text%3E%3C/svg%3E">
 <style>
   :root{ --ink:#eaf0ff; --soft:#aab6d6; --accent:#ff7aa2; }
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%;background:#05060a;overflow:hidden}
+  html,body{margin:0;height:100%;background:#2a3f72;overflow:hidden}
   body{ font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
     color:var(--ink); -webkit-tap-highlight-color:transparent; }
   #scene{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:manipulation;cursor:pointer}
@@ -30,7 +30,7 @@
   }
   #caption p{
     margin:.7em auto 0;font-size:clamp(12px,2.2vw,16px);letter-spacing:.18em;
-    color:var(--soft);text-shadow:0 2px 18px rgba(0,0,0,.7);
+    color:rgba(255,246,238,.94);text-shadow:0 2px 18px rgba(0,0,0,.75);
   }
 
   .ctl{
@@ -46,7 +46,7 @@
   #replay{bottom:14px;right:16px;padding:9px 16px}
 
   #vig{position:fixed;inset:0;pointer-events:none;
-    background:radial-gradient(120% 90% at 50% 42%, rgba(0,0,0,0) 58%, rgba(0,0,0,.5) 100%)}
+    background:radial-gradient(125% 95% at 50% 40%, rgba(0,0,0,0) 62%, rgba(0,0,0,.36) 100%)}
 
   #loader{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
     color:var(--soft);font-size:13px;letter-spacing:.2em;text-transform:uppercase}
@@ -92,8 +92,14 @@ var CONFIG = {
   ASSEMBLE_MS: 2300,       // разгон выпуска кусочков (чем дальше — тем быстрее)
   PIECE_MS:    900,        // длительность полёта одного кусочка
 
-  BG_TOP: "#0a0e1c",
-  BG_BOT: "#05060a"
+  // фон в стиле «день → закат», под цвет твоих фото неба
+  BG_STOPS: [
+    [0.00, "#2a3f72"],
+    [0.34, "#5d5188"],
+    [0.58, "#a6627e"],
+    [0.78, "#e08a63"],
+    [1.00, "#ffc88c"]
+  ]
 };
 /* =======================  КОНЕЦ НАСТРОЕК  ============================== */
 
@@ -145,15 +151,25 @@ var raf=null, startT=null, captionShown=false, settled=false;
 
 /* ---------- фон ---------- */
 function makeStars(){
-  stars=[]; var n=clamp(Math.round((W*H)/(9000*dpr)),60,320);
-  for(var i=0;i<n;i++) stars.push({x:Math.random()*W,y:Math.random()*H,r:rnd(0.4,1.6)*dpr,a:rnd(0.2,0.9),tw:rnd(0.5,1.6),ph:rnd(0,6.28)});
+  // на закатном небе — лишь несколько первых звёзд повыше
+  stars=[]; var n=clamp(Math.round((W*H)/(20000*dpr)),20,120);
+  for(var i=0;i<n;i++) stars.push({x:Math.random()*W,y:Math.random()*H*0.46,r:rnd(0.4,1.3)*dpr,a:rnd(0.15,0.6),tw:rnd(0.5,1.6),ph:rnd(0,6.28)});
 }
-function makeBg(){ bgGrad=ctx.createLinearGradient(0,0,0,H); bgGrad.addColorStop(0,CONFIG.BG_TOP); bgGrad.addColorStop(1,CONFIG.BG_BOT); }
+function makeBg(){
+  bgGrad=ctx.createLinearGradient(0,0,0,H);
+  var st=CONFIG.BG_STOPS||[[0,"#2a3f72"],[1,"#ffc88c"]];
+  for(var i=0;i<st.length;i++) bgGrad.addColorStop(st[i][0], st[i][1]);
+}
 function drawBg(t){
   ctx.fillStyle=bgGrad; ctx.fillRect(0,0,W,H);
+  // тёплое сияние у горизонта (солнце на закате)
+  var sg=ctx.createRadialGradient(W*0.5,H*0.96,0, W*0.5,H*0.96,H*0.66);
+  sg.addColorStop(0,"rgba(255,196,140,0.30)");
+  sg.addColorStop(1,"rgba(255,196,140,0)");
+  ctx.fillStyle=sg; ctx.fillRect(0,0,W,H);
   for(var i=0;i<stars.length;i++){ var s=stars[i];
     var a=RM?s.a*0.7:s.a*(0.55+0.45*Math.sin(t*0.001*s.tw+s.ph));
-    ctx.globalAlpha=clamp(a,0,1); ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,6.2832); ctx.fillStyle="#cdd8ff"; ctx.fill();
+    ctx.globalAlpha=clamp(a,0,1); ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,6.2832); ctx.fillStyle="#fff2e0"; ctx.fill();
   }
   ctx.globalAlpha=1;
 }
