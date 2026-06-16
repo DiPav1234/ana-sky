@@ -79,10 +79,11 @@ var CONFIG = {
   SHOWCASE_STAGGER: 300, SHOWCASE_GROW: 900, SHOWCASE_HOLD: 650, SHOWCASE_SIZE: 0.32,
   ASSEMBLE_MS: 2300, PIECE_MS: 900,
 
-  CORE_R: 0.64,    // плотное ядро (она). дальше — края разлетаются наружу
-  FRAY_R: 1.46,    // докуда края рассыпаются фото
-  DISPERSE: 4.4,   // насколько края «выдувает» наружу (больше = воздушнее/распылённее)
-  FRAY_MAX: { desktop: 4600, mobile: 1900 },
+  CORE_R: 0.46,    // маленькое плотное ядро (её лицо/торс), остальное разлетается
+  FRAY_R: 1.46,
+  SPREAD: 0.52,    // разлёт наружу (доля меньшей стороны экрана) — шире по странице
+  CHAOS:  0.17,    // хаотичный случайный разброс (доля меньшей стороны)
+  FRAY_MAX: { desktop: 5200, mobile: 2200 },
 
   AMBIENT_N: { desktop: 260, mobile: 110 },  // фото-поток по всей странице (сзади)
   FALL_N:    { desktop: 30,  mobile: 14 },  // падающие фото-оверлей (сверху) — деликатно
@@ -168,8 +169,9 @@ function buildAtlas(){
   Typ=new Uint8Array(nCells);FRot=new Float32Array(nCells);FAlpha=new Float32Array(nCells);
   frayList=[];
   var op=CONFIG.TILE_OPACITY, idx=0, pd=cell*dpr;
-  var CR=CONFIG.CORE_R, FR=CONFIG.FRAY_R, DISP=CONFIG.DISPERSE||3;
-  var pcx=gridX+mW/2, pcy=gridY+mH/2;   // центр портрета — от него разлёт наружу
+  var CR=CONFIG.CORE_R, FR=CONFIG.FRAY_R;
+  var pcx=gridX+mW/2, pcy=gridY+mH/2, mn=Math.min(W,H);   // центр портрета — от него разлёт
+  var SPREAD=(CONFIG.SPREAD||0.4)*mn, CHAOS=(CONFIG.CHAOS||0.1)*mn;
   for(var ry=0;ry<rows;ry++){ for(var rx=0;rx<cols;rx++){
     var p=(ry*cols+rx)*4, r=data[p],g=data[p+1],b=data[p+2];
     var ti=pickTile(r,g,b), dx=rx*ac, dy=ry*ac;
@@ -181,17 +183,17 @@ function buildAtlas(){
     var nx=(rx+0.5)/cols-0.5, ny=(ry+0.5)/rows-0.5, dn=2*Math.sqrt(nx*nx+ny*ny);
     if(dn<=CR){ Typ[idx]=1; Tx[idx]=cx; Ty[idx]=cy; FRot[idx]=0; FAlpha[idx]=1; }
     else if(dn<=FR){
-      var ef=(dn-CR)/(FR-CR);                 // 0..1 к краю
-      var keep = Math.random() < (1-Math.pow(ef,1.45)); // фото редеют порядком (плавнее)
+      var ef=(dn-CR)/(FR-CR);                 // 0..1 наружу
+      var keep = Math.random() < (1-Math.pow(ef,1.9)); // держим много, но раскидываем ШИРОКО
       if(keep){
         Typ[idx]=2;
-        // разлёт НАРУЖУ от центра (как стрелки) + лёгкая случайность => распыление
+        // сильный разлёт наружу от центра + крупный хаотичный разброс => по всей странице
         var ddx=cx-pcx, ddy=cy-pcy, dl=Math.sqrt(ddx*ddx+ddy*ddy)||1;
-        var push=ef*pd*DISP, jr=ef*pd*1.5;
-        Tx[idx]=cx+(ddx/dl)*push+rnd(-1,1)*jr;
-        Ty[idx]=cy+(ddy/dl)*push+rnd(-1,1)*jr;
-        FRot[idx]=rnd(-0.6,0.6)*ef;
-        FAlpha[idx]=clamp(1-ef*0.7,0.2,1);
+        var push=Math.pow(ef,1.2)*SPREAD, ch=ef*CHAOS;
+        var tx=cx+(ddx/dl)*push+rnd(-1,1)*ch, ty=cy+(ddy/dl)*push+rnd(-1,1)*ch;
+        Tx[idx]=clamp(tx,-0.02*W,1.02*W); Ty[idx]=clamp(ty,-0.02*H,1.02*H);
+        FRot[idx]=rnd(-0.8,0.8)*ef;
+        FAlpha[idx]=clamp(1-ef*0.6,0.16,1);
         frayList.push(idx);
       } else Typ[idx]=0;
     } else Typ[idx]=0;
@@ -208,14 +210,14 @@ function buildAtlas(){
   // запекаем ФИНАЛЬНЫЙ собранный кадр в один статичный canvas.
   // он 1:1 совпадает с последним кадром сборки (те же позиции/поворот/прозрачность),
   // поэтому переход «сборка -> собрано» без рывка, и он статичен -> ничего не дёргается.
-  var half=pd/2, mg=Math.ceil((DISP+2.5)*pd);
-  finalX0=gridX-mg; finalY0=gridY-mg;
+  var half=pd/2;
+  finalX0=0; finalY0=0;
   finalCv=document.createElement("canvas");
-  finalCv.width=Math.ceil(mW+2*mg); finalCv.height=Math.ceil(mH+2*mg);
+  finalCv.width=W; finalCv.height=H;            // кадр на весь экран — разлёт по всей странице
   var fc=finalCv.getContext("2d");
   for(var i=0;i<nCells;i++){ if(Typ[i]===0) continue;
     var rot=(Typ[i]===2)?FRot[i]:0, al=(Typ[i]===2)?FAlpha[i]:1;
-    fc.save(); fc.globalAlpha=al; fc.translate(Tx[i]-finalX0, Ty[i]-finalY0); if(rot) fc.rotate(rot);
+    fc.save(); fc.globalAlpha=al; fc.translate(Tx[i], Ty[i]); if(rot) fc.rotate(rot);
     fc.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,-half,-half,pd,pd); fc.restore();
   }
 }
@@ -297,7 +299,7 @@ function seedAssembly(){
     var ti=Ti[i];
     Sx[i]=anchX[ti]+rnd(-1,1)*jit; Sy[i]=anchY[ti]+rnd(-1,1)*jit;
     Scl[i]=rnd(2.4,5.0); Rot[i]=rnd(-0.5,0.5);
-    var dx=Tx[i]-cx,dy=Ty[i]-cy,rank=Math.sqrt(dx*dx+dy*dy)/maxDist;
+    var dx=Tx[i]-cx,dy=Ty[i]-cy,rank=clamp(Math.sqrt(dx*dx+dy*dy)/maxDist,0,1);
     Del[i]=CONFIG.ASSEMBLE_MS*Math.pow(rank,1.7)+rnd(0,90);
   }
 }
