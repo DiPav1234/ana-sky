@@ -79,9 +79,8 @@ var CONFIG = {
   SHOWCASE_STAGGER: 300, SHOWCASE_GROW: 900, SHOWCASE_HOLD: 650, SHOWCASE_SIZE: 0.32,
   ASSEMBLE_MS: 2300, PIECE_MS: 900,
 
-  CORE_R: 0.62,    // плотное ядро (дальше широко и плавно тает — без чёткого круга)
-  CORE_FADE: 1.16, // докуда ядро растворяется
-  FRAY_R: 1.40,    // докуда края рассыпаются фото (с нахлёстом на спад ядра — без зазора)
+  CORE_R: 0.72,    // плотное ядро (дальше края редеют/рассыпаются)
+  FRAY_R: 1.40,    // докуда края рассыпаются фото
   FRAY_MAX: { desktop: 3000, mobile: 1200 },
 
   AMBIENT_N: { desktop: 200, mobile: 90 },  // фото-поток по всей странице (сзади)
@@ -112,7 +111,7 @@ function avgColor(img){ var c=document.createElement("canvas");c.width=c.height=
 /* ---------- состояние ---------- */
 var tiles=[],tileAvg=[],targetImg=null;
 var cols=0,rows=0,cell=0,gridX=0,gridY=0,mW=0,mH=0;
-var atlas=null,core=null,ac=0;
+var atlas=null,finalCv=null,finalX0=0,finalY0=0,ac=0;
 var Ncol,Nrow,Ti,Tx,Ty,Sx,Sy,Rot,Scl,Del,Typ,FRot,FAlpha,nCells=0; // Typ: 0 drop,1 core,2 fray
 var frayList=[];
 var anchX=[],anchY=[],appearAt=[],rotBase=[],showLong=0,driftAmp=0;
@@ -201,14 +200,19 @@ function buildAtlas(){
     frayList.length=maxF;
   }
 
-  // ядро портрета: атлас с мягким эллипс-краем (отдельный canvas)
-  core=document.createElement("canvas"); core.width=atlas.width; core.height=atlas.height;
-  var cc=core.getContext("2d"); cc.drawImage(atlas,0,0);
-  cc.globalCompositeOperation="destination-in";
-  var aw=core.width,ah=core.height,R=Math.max(aw,ah)/2;
-  var g2=cc.createRadialGradient(aw/2,ah/2,R*CONFIG.CORE_R, aw/2,ah/2,R*CONFIG.CORE_FADE);
-  g2.addColorStop(0,"rgba(0,0,0,1)"); g2.addColorStop(0.6,"rgba(0,0,0,0.9)"); g2.addColorStop(1,"rgba(0,0,0,0)");
-  cc.fillStyle=g2; cc.fillRect(0,0,aw,ah); cc.globalCompositeOperation="source-over";
+  // запекаем ФИНАЛЬНЫЙ собранный кадр в один статичный canvas.
+  // он 1:1 совпадает с последним кадром сборки (те же позиции/поворот/прозрачность),
+  // поэтому переход «сборка -> собрано» без рывка, и он статичен -> ничего не дёргается.
+  var half=pd/2, mg=3*pd;
+  finalX0=gridX-mg; finalY0=gridY-mg;
+  finalCv=document.createElement("canvas");
+  finalCv.width=Math.ceil(mW+2*mg); finalCv.height=Math.ceil(mH+2*mg);
+  var fc=finalCv.getContext("2d");
+  for(var i=0;i<nCells;i++){ if(Typ[i]===0) continue;
+    var rot=(Typ[i]===2)?FRot[i]:0, al=(Typ[i]===2)?FAlpha[i]:1;
+    fc.save(); fc.globalAlpha=al; fc.translate(Tx[i]-finalX0, Ty[i]-finalY0); if(rot) fc.rotate(rot);
+    fc.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,-half,-half,pd,pd); fc.restore();
+  }
 }
 
 /* ---------- поток фото по странице (сзади) ---------- */
@@ -265,7 +269,7 @@ function seedShowcase(){
     anchX[k]=cx+Math.cos(ang)*spread*Math.sqrt(rr); anchY[k]=cy+Math.sin(ang)*spread*Math.sqrt(rr)*0.92;
     rotBase[k]=rnd(-0.18,0.18); appearAt[order[k]]=k*CONFIG.SHOWCASE_STAGGER; }
   ASSEMBLE_START=(16-1)*CONFIG.SHOWCASE_STAGGER+CONFIG.SHOWCASE_GROW+CONFIG.SHOWCASE_HOLD;
-  assembleDur=CONFIG.ASSEMBLE_MS+CONFIG.PIECE_MS+80; settleAt=ASSEMBLE_START+assembleDur;
+  assembleDur=CONFIG.ASSEMBLE_MS+CONFIG.PIECE_MS+250; settleAt=ASSEMBLE_START+assembleDur;
 }
 function showcasePos(i,t){ return [anchX[i]+Math.sin(t*0.0004+i*1.7)*driftAmp, anchY[i]+Math.cos(t*0.00033+i*1.3)*driftAmp]; }
 function drawShowcase(t,gA){
@@ -297,7 +301,11 @@ function drawAssembly(bt){
   for(var i=0;i<nCells;i++){ if(Typ[i]===0) continue;
     var pr=(bt-Del[i])/CONFIG.PIECE_MS; if(pr<=0) continue;
     var baseA=(Typ[i]===2)?FAlpha[i]:1;
-    if(pr>=1){ ctx.globalAlpha=baseA; ctx.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,Tx[i]-half,Ty[i]-half,pd,pd); ctx.globalAlpha=1; continue; }
+    if(pr>=1){
+      if(Typ[i]===2 && FRot[i]) blit(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,Tx[i],Ty[i],pd,pd,FRot[i],baseA);
+      else { ctx.globalAlpha=baseA; ctx.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,Tx[i]-half,Ty[i]-half,pd,pd); ctx.globalAlpha=1; }
+      continue;
+    }
     var e=easeInOutCubic(pr);
     var x=Sx[i]+(Tx[i]-Sx[i])*e, y=Sy[i]+(Ty[i]-Sy[i])*e, sc=Scl[i]+(1-Scl[i])*e;
     var rot=Rot[i]*(1-e)+(Typ[i]===2?FRot[i]*e:0), al=clamp(pr*2,0,1)*baseA;
@@ -307,19 +315,10 @@ function drawAssembly(bt){
   ctx.globalAlpha=1;
 }
 
-/* ---------- собранный портрет (ядро + рассыпные края) ---------- */
+/* ---------- собранный портрет: статичный запечённый кадр (без дрожи/попа) ---------- */
 function drawPortrait(t){
-  var breathe=RM?1:(1+0.005*Math.sin(t*0.0009));
-  var w=mW*breathe,h=mH*breathe,ox=gridX-(w-mW)/2,oy=gridY-(h-mH)/2;
   ctx.imageSmoothingEnabled=true;
-  ctx.drawImage(core,0,0,core.width,core.height,ox,oy,w,h);   // плотное ядро
-  var pd=cell*dpr,half=pd/2;
-  for(var k=0;k<frayList.length;k++){ var i=frayList[k];      // рассыпные края
-    var dx=RM?0:Math.sin(t*0.0003+i)*driftAmp*0.5, dy=RM?0:Math.cos(t*0.00026+i)*driftAmp*0.5;
-    ctx.save(); ctx.globalAlpha=FAlpha[i]; ctx.translate(Tx[i]+dx,Ty[i]+dy); ctx.rotate(FRot[i]);
-    ctx.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,-half,-half,pd,pd); ctx.restore();
-  }
-  ctx.globalAlpha=1;
+  ctx.drawImage(finalCv, finalX0, finalY0);
 }
 
 /* ---------- кадр ---------- */
