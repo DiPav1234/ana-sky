@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ты — в каждом небе</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#05060a">
+<meta name="description" content="">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%98%81%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<style>
+  :root{
+    --ink:#eaf0ff;
+    --soft:#aab6d6;
+    --accent:#ff7aa2;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#05060a;overflow:hidden}
+  body{
+    font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+    color:var(--ink); -webkit-tap-highlight-color:transparent;
+  }
+  #scene{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:manipulation;cursor:pointer}
+
+  /* подпись */
+  #caption{
+    position:fixed;left:0;right:0;bottom:max(5vh,28px);
+    text-align:center;pointer-events:none;
+    opacity:0;transform:translateY(14px);
+    transition:opacity 1.6s ease, transform 1.6s ease;
+    padding:0 18px;
+  }
+  #caption.show{opacity:1;transform:none}
+  #caption h1{
+    margin:0;font-size:clamp(24px,5vw,46px);font-weight:800;letter-spacing:.3px;
+    text-shadow:0 2px 30px rgba(0,0,0,.6), 0 0 26px rgba(255,122,162,.25);
+  }
+  #caption p{
+    margin:.5em auto 0;max-width:30ch;font-size:clamp(13px,2.4vw,18px);
+    color:var(--soft);line-height:1.5;text-shadow:0 2px 18px rgba(0,0,0,.7);
+  }
+
+  /* кнопки */
+  .ctl{
+    position:fixed;z-index:5;border:1px solid rgba(255,255,255,.16);
+    background:rgba(255,255,255,.05);color:var(--soft);
+    border-radius:999px;cursor:pointer;backdrop-filter:blur(6px);
+    font:inherit;font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    transition:.25s ease;opacity:0;
+  }
+  .ctl.show{opacity:1}
+  .ctl:hover,.ctl:focus-visible{outline:none;color:#fff;border-color:var(--accent);
+    box-shadow:0 0 22px rgba(255,122,162,.25)}
+  #replay{bottom:14px;right:16px;padding:9px 16px}
+  #hint{
+    position:fixed;left:0;right:0;bottom:max(5vh,28px);text-align:center;
+    color:rgba(255,255,255,.0);font-size:12px;letter-spacing:.12em;pointer-events:none;
+  }
+
+  /* мягкая виньетка поверх сцены */
+  #vig{position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 42%, rgba(0,0,0,0) 55%, rgba(0,0,0,.55) 100%)}
+
+  #loader{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    color:var(--soft);font-size:13px;letter-spacing:.2em;text-transform:uppercase}
+  #loader.hide{opacity:0;transition:opacity .6s ease;pointer-events:none}
+</style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+  <div id="vig"></div>
+
+  <div id="caption">
+    <h1 id="capH"></h1>
+    <p id="capP"></p>
+  </div>
+
+  <button id="replay" class="ctl" aria-label="Собрать заново">собрать заново</button>
+  <div id="loader">собираю небо…</div>
+
+<script src="data.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* =======================================================================
+   НАСТРОЙКИ — РЕДАКТИРУЙ ЗДЕСЬ
+   • HEADLINE / SUBLINE — текст подписи, который проявляется после сборки.
+   • TILE_OPACITY — насколько видны фото-неба поверх портрета (0.3..0.7).
+   • CELL_BUDGET — сколько «кусочков». Больше = детальнее, но тяжелее.
+   ======================================================================= */
+var CONFIG = {
+  HEADLINE: "Ты — в каждом небе",
+  SUBLINE:  "Из всех небес, что я снимал, всегда складываешься ты.",
+  TILE_OPACITY: 0.52,
+  CELL_BUDGET: { desktop: 3800, mobile: 1700 },
+  ASSEMBLE_MS: 2600,   // разброс старта кусочков
+  PIECE_MS:    1000,   // длительность полёта одного кусочка
+  BG_TOP: "#0a0e1c",
+  BG_BOT: "#05060a"
+};
+/* =======================  КОНЕЦ НАСТРОЕК  ============================== */
+
+var DATA = window.MOSAIC_DATA || {tiles:[],target:""};
+var RM = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+var cv = document.getElementById("scene");
+var ctx = cv.getContext("2d");
+var capWrap = document.getElementById("caption");
+var capH = document.getElementById("capH");
+var capP = document.getElementById("capP");
+var replayBtn = document.getElementById("replay");
+var loader = document.getElementById("loader");
+
+capH.textContent = CONFIG.HEADLINE;
+capP.textContent = CONFIG.SUBLINE;
+
+var dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+var W=0, H=0;                 // device px
+function isMobile(){ return Math.min(window.innerWidth, window.innerHeight) < 620; }
+
+/* ---------- утилиты ---------- */
+function easeOutCubic(t){ return 1 - Math.pow(1-t, 3); }
+function rnd(a,b){ return a + Math.random()*(b-a); }
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+
+function loadImg(src){
+  return new Promise(function(res,rej){
+    var im=new Image(); im.onload=function(){res(im);}; im.onerror=rej; im.src=src;
+  });
+}
+
+/* средний цвет картинки */
+function avgColor(img){
+  var c=document.createElement("canvas"); c.width=c.height=8;
+  var x=c.getContext("2d"); x.drawImage(img,0,0,8,8);
+  var d=x.getImageData(0,0,8,8).data, r=0,g=0,b=0,n=64;
+  for(var i=0;i<d.length;i+=4){ r+=d[i]; g+=d[i+1]; b+=d[i+2]; }
+  return [r/n, g/n, b/n];
+}
+
+/* ---------- состояние ---------- */
+var tiles=[], tileAvg=[], targetImg=null;
+var cols=0, rows=0, cell=0;        // cell в CSS px
+var gridX=0, gridY=0;              // левый-верх мозаики, device px
+var mW=0, mH=0;                    // размер мозаики, device px
+var atlas=null, ac=0;             // атлас собранной мозаики + размер ячейки атласа
+// параллельные массивы по ячейкам
+var Ncol=null, Nrow=null, Ccx=null, Ccy=null, Sx=null, Sy=null, Rot=null, Scl=null, Del=null;
+var nCells=0;
+var stars=[];
+var raf=null, startT=null, totalAnim=0, captionShown=false, settled=false, built=false;
+
+/* ---------- фон ---------- */
+function makeStars(){
+  stars=[];
+  var n = Math.round((W*H)/(9000*dpr));
+  n = clamp(n, 60, 320);
+  for(var i=0;i<n;i++){
+    stars.push({ x:Math.random()*W, y:Math.random()*H,
+      r:rnd(0.4,1.6)*dpr, a:rnd(0.2,0.9), tw:rnd(0.5,1.6), ph:rnd(0,6.28) });
+  }
+}
+var bgGrad=null;
+function makeBg(){
+  bgGrad=ctx.createLinearGradient(0,0,0,H);
+  bgGrad.addColorStop(0, CONFIG.BG_TOP);
+  bgGrad.addColorStop(1, CONFIG.BG_BOT);
+}
+function drawBg(t){
+  ctx.fillStyle=bgGrad; ctx.fillRect(0,0,W,H);
+  for(var i=0;i<stars.length;i++){
+    var s=stars[i];
+    var a = RM ? s.a*0.7 : s.a*(0.55+0.45*Math.sin(t*0.001*s.tw + s.ph));
+    ctx.globalAlpha=clamp(a,0,1);
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 6.2832);
+    ctx.fillStyle="#cdd8ff"; ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+
+/* ---------- раскладка + сборка мозаики ---------- */
+function computeGrid(){
+  var aspect = targetImg.width/targetImg.height;          // w/h
+  var budget = isMobile()? CONFIG.CELL_BUDGET.mobile : CONFIG.CELL_BUDGET.desktop;
+  var r = Math.round(Math.sqrt(budget/aspect));
+  rows = clamp(r, 24, 110);
+  cols = clamp(Math.round(rows*aspect), 18, 110);
+
+  // доступная область (в CSS px), оставляем место под подпись снизу
+  var cssW = W/dpr, cssH = H/dpr;
+  var availW = cssW*0.92;
+  var availH = cssH*0.80;
+  cell = Math.floor(Math.min(availW/cols, availH/rows));
+  cell = Math.max(cell, 3);
+  mW = cell*cols*dpr; mH = cell*rows*dpr;
+  gridX = Math.round((W - mW)/2);
+  gridY = Math.round((H*0.80 - mH)/2 + H*0.02);
+  if(gridY < H*0.03) gridY = Math.round(H*0.03);
+}
+
+function sampleTargetColors(){
+  // рисуем мини-цель в сетку cols×rows и читаем средний цвет каждой ячейки
+  var c=document.createElement("canvas"); c.width=cols; c.height=rows;
+  var x=c.getContext("2d");
+  x.drawImage(targetImg, 0,0, cols, rows);
+  return x.getImageData(0,0,cols,rows).data; // RGBA по ячейкам
+}
+
+function pickTile(r,g,b){
+  // 3 ближайших по цвету тайла -> случайный из них (чтобы не было плоских зон)
+  var best=[];
+  for(var i=0;i<tileAvg.length;i++){
+    var t=tileAvg[i];
+    var d=(t[0]-r)*(t[0]-r)+(t[1]-g)*(t[1]-g)+(t[2]-b)*(t[2]-b);
+    best.push([d,i]);
+  }
+  best.sort(function(a,b){return a[0]-b[0];});
+  var k=Math.min(3,best.length);
+  return best[Math.floor(Math.random()*k)][1];
+}
+
+function buildAtlas(){
+  var data = sampleTargetColors();
+  ac = clamp(Math.round(cell*dpr), 6, 26);
+  atlas=document.createElement("canvas");
+  atlas.width=cols*ac; atlas.height=rows*ac;
+  var ax=atlas.getContext("2d");
+
+  nCells=cols*rows;
+  Ncol=new Int16Array(nCells); Nrow=new Int16Array(nCells);
+  Ccx=new Float32Array(nCells); Ccy=new Float32Array(nCells);
+  Sx=new Float32Array(nCells); Sy=new Float32Array(nCells);
+  Rot=new Float32Array(nCells); Scl=new Float32Array(nCells); Del=new Float32Array(nCells);
+
+  var op=CONFIG.TILE_OPACITY;
+  var cx0=W/2, cy0=gridY+mH/2;
+  var maxDist=Math.sqrt((mW/2)*(mW/2)+(mH/2)*(mH/2)) || 1;
+  var idx=0;
+  for(var ry=0; ry<rows; ry++){
+    for(var rx=0; rx<cols; rx++){
+      var p=(ry*cols+rx)*4;
+      var r=data[p], g=data[p+1], b=data[p+2];
+      var ti=pickTile(r,g,b);
+      // ячейка атласа: цвет-портрета + тайл сверху
+      var dx=rx*ac, dy=ry*ac;
+      ax.globalAlpha=1;
+      ax.fillStyle="rgb("+(r|0)+","+(g|0)+","+(b|0)+")";
+      ax.fillRect(dx,dy,ac,ac);
+      ax.globalAlpha=op;
+      ax.drawImage(tiles[ti], 0,0,tiles[ti].width,tiles[ti].height, dx,dy,ac,ac);
+      ax.globalAlpha=1;
+
+      Ncol[idx]=rx; Nrow[idx]=ry;
+      var ccx=gridX+rx*cell*dpr+cell*dpr/2;
+      var ccy=gridY+ry*cell*dpr+cell*dpr/2;
+      Ccx[idx]=ccx; Ccy[idx]=ccy;
+      idx++;
+    }
+  }
+  // подсветим лица/детали чуть резче: лёгкий контраст атласа поверх (необяз.)
+}
+
+function seedStarts(){
+  var cx0=W/2, cy0=gridY+mH/2;
+  var maxDist=Math.sqrt((mW/2)*(mW/2)+(mH/2)*(mH/2)) || 1;
+  for(var i=0;i<nCells;i++){
+    // старт: разбросаны по экрану (с заходом за края) + поворот/масштаб
+    Sx[i]=rnd(-0.15,1.15)*W;
+    Sy[i]=rnd(-0.15,1.15)*H;
+    Rot[i]=rnd(-0.6,0.6);
+    Scl[i]=rnd(0.35,1.7);
+    // задержка: от центра наружу (центр собирается первым)
+    var dx=Ccx[i]-cx0, dy=Ccy[i]-cy0;
+    var dist=Math.sqrt(dx*dx+dy*dy)/maxDist;
+    Del[i]=dist*CONFIG.ASSEMBLE_MS + rnd(0, CONFIG.ASSEMBLE_MS*0.18);
+  }
+  totalAnim=CONFIG.ASSEMBLE_MS + CONFIG.PIECE_MS + CONFIG.ASSEMBLE_MS*0.18 + 60;
+}
+
+/* ---------- отрисовка кадра ---------- */
+function drawSettled(t){
+  var breathe = RM ? 1 : (1 + 0.005*Math.sin(t*0.0009));
+  var w=mW*breathe, h=mH*breathe;
+  var ox=gridX-(w-mW)/2, oy=gridY-(h-mH)/2;
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(atlas, 0,0,atlas.width,atlas.height, ox,oy,w,h);
+}
+
+function frame(now){
+  if(startT==null) startT=now;
+  var t=now-startT;
+  drawBg(now);
+
+  if(RM){
+    var a=clamp(t/1200,0,1);
+    ctx.globalAlpha=a; drawSettled(t); ctx.globalAlpha=1;
+    if(t>1100 && !captionShown) showCaption();
+    raf=requestAnimationFrame(frame); return;
+  }
+
+  if(t < totalAnim){
+    var pdpr=cell*dpr;
+    var half=pdpr/2;
+    for(var i=0;i<nCells;i++){
+      var pr=(t-Del[i])/CONFIG.PIECE_MS;
+      if(pr<=0){ continue; }
+      if(pr>=1){
+        // собран: рисуем ровно (без трансформаций — быстрее)
+        ctx.drawImage(atlas, Ncol[i]*ac, Nrow[i]*ac, ac, ac,
+          Ccx[i]-half, Ccy[i]-half, pdpr, pdpr);
+        continue;
+      }
+      var e=easeOutCubic(pr);
+      var x=Sx[i]+(Ccx[i]-Sx[i])*e;
+      var y=Sy[i]+(Ccy[i]-Sy[i])*e;
+      var rot=Rot[i]*(1-e);
+      var sc=Scl[i]+(1-Scl[i])*e;
+      var al=clamp(pr*1.7,0,1);
+      ctx.save();
+      ctx.globalAlpha=al;
+      ctx.translate(x,y); ctx.rotate(rot); ctx.scale(sc,sc);
+      ctx.drawImage(atlas, Ncol[i]*ac, Nrow[i]*ac, ac, ac, -half,-half, pdpr,pdpr);
+      ctx.restore();
+    }
+  } else {
+    settled=true;
+    drawSettled(t);
+    if(!captionShown) showCaption();
+  }
+  raf=requestAnimationFrame(frame);
+}
+
+function showCaption(){
+  captionShown=true;
+  capWrap.classList.add("show");
+  replayBtn.classList.add("show");
+}
+
+/* ---------- запуск / перезапуск ---------- */
+function start(){
+  if(raf) cancelAnimationFrame(raf);
+  seedStarts();
+  startT=null; captionShown=false; settled=false;
+  capWrap.classList.remove("show");
+  replayBtn.classList.remove("show");
+  raf=requestAnimationFrame(frame);
+}
+
+function resizeAll(rebuildAnim){
+  var cssW=window.innerWidth, cssH=window.innerHeight;
+  W=Math.round(cssW*dpr); H=Math.round(cssH*dpr);
+  cv.width=W; cv.height=H; cv.style.width=cssW+"px"; cv.style.height=cssH+"px";
+  makeBg(); makeStars();
+  if(!targetImg) return;
+  computeGrid(); buildAtlas();
+  if(rebuildAnim){ start(); }
+  else {
+    // после ресайза показываем уже собранным, без повторной анимации
+    if(raf) cancelAnimationFrame(raf);
+    startT=null; settled=true; captionShown=true;
+    capWrap.classList.add("show"); replayBtn.classList.add("show");
+    (function idle(now){ drawBg(now); drawSettled(now); raf=requestAnimationFrame(idle); })(performance.now());
+  }
+}
+
+/* debounce resize */
+var rzTimer=null, everStarted=false;
+window.addEventListener("resize", function(){
+  if(rzTimer) clearTimeout(rzTimer);
+  rzTimer=setTimeout(function(){ resizeAll(false); }, 200);
+});
+
+/* взаимодействие: клик/тап -> собрать заново */
+cv.addEventListener("click", function(){ start(); });
+replayBtn.addEventListener("click", function(e){ e.stopPropagation(); start(); });
+
+/* ---------- инициализация ---------- */
+Promise.all([
+  Promise.all((DATA.tiles||[]).map(loadImg)),
+  loadImg(DATA.target)
+]).then(function(res){
+  tiles=res[0]; targetImg=res[1];
+  tileAvg=tiles.map(avgColor);
+  loader.classList.add("hide");
+  var cssW=window.innerWidth, cssH=window.innerHeight;
+  W=Math.round(cssW*dpr); H=Math.round(cssH*dpr);
+  cv.width=W; cv.height=H; cv.style.width=cssW+"px"; cv.style.height=cssH+"px";
+  makeBg(); makeStars(); computeGrid(); buildAtlas();
+  built=true; everStarted=true;
+  // debug-режим ?still=1 — показать сразу собранным (для проверки/скриншота)
+  if(/[?&]still/.test(location.search)){
+    seedStarts(); settled=true; captionShown=true;
+    capWrap.classList.add("show"); replayBtn.classList.add("show");
+    (function idle(now){ drawBg(now); drawSettled(now); raf=requestAnimationFrame(idle); })(performance.now());
+  } else {
+    start();
+  }
+}).catch(function(err){
+  loader.textContent="не удалось загрузить изображения";
+  try{ console.error(err); }catch(e){}
+});
+
+})();
+</script>
+</body>
+</html>
