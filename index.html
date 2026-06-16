@@ -79,9 +79,10 @@ var CONFIG = {
   SHOWCASE_STAGGER: 300, SHOWCASE_GROW: 900, SHOWCASE_HOLD: 650, SHOWCASE_SIZE: 0.32,
   ASSEMBLE_MS: 2300, PIECE_MS: 900,
 
-  EDGE_SOFT: 0.07,    // мягкость самого края фотки (фото остаётся ЦЕЛЫМ, край мягко гаснет)
   HALO_EXP: 0.85,     // как далеко тянется хвост ореола (больше = шире)
-  HALO_FALLOFF: 0.24, // густой плавный спад у края (больше = мягче переход, без границы)
+  HALO_FALLOFF: 0.22, // на сколько вглубь редеет рассыпь
+  HALO_EDGE: 0.42,    // плотность рассыпи у края (<1 => просветы, это РАССЫПЬ, а не фейд-рамка)
+  HALO_ALPHA: 0.88,   // каждая плитка-рассыпь — ЧЁТКАЯ фотка (не полупрозрачный фейд)
   HALO_CAP: { desktop: 8500, mobile: 3800 },
 
   AMBIENT_N: { desktop: 260, mobile: 110 },  // фото-поток по всей странице (сзади)
@@ -177,8 +178,7 @@ function buildAtlas(){
     ax.globalAlpha=op; ax.drawImage(tiles[ti],0,0,tiles[ti].width,tiles[ti].height,dx,dy,ac,ac); ax.globalAlpha=1;
     Ncol[idx]=rx; Nrow[idx]=ry; Ti[idx]=ti;
     Tx[idx]=gridX+rx*pd+half; Ty[idx]=gridY+ry*pd+half; FRot[idx]=0;
-    var nxn=(rx+0.5)/cols, nyn=(ry+0.5)/rows, ed=Math.min(nxn,1-nxn,nyn,1-nyn);
-    FAlpha[idx]=clamp(ed/EDGE,0,1);     // фото целое; лишь самый край мягко гаснет
+    FAlpha[idx]=1;                      // фото ЦЕЛОЕ и ЧЁТКОЕ — никакого фейда по краю
     Typ[idx]=1; idx++;
   }}
 
@@ -196,14 +196,14 @@ function buildAtlas(){
       // нерегулярная глубина ореола по направлению => плюмы/клочья, а не ровный прямоугольник
       var ang=Math.atan2(ry2-ccy, rx2-ccx);
       var wob=0.45 + 0.55*(0.5+0.5*Math.sin(ang*3.0+0.7)) + 0.35*(0.5+0.5*Math.sin(ang*7.0+2.1));
-      var keepP=Math.exp(-dc/(FO*wob));
-      if(Math.random()>=keepP) continue;                       // у края keepP≈1 (густо), дальше тает
+      var dens=Math.min(CONFIG.HALO_EDGE||0.42, Math.exp(-dc/(FO*wob)));
+      if(Math.random()>=dens) continue;                        // ДИСКРЕТНАЯ рассыпь с просветами (не фейд)
       var gcc=clamp(rx2,0,cols-1), gcr=clamp(ry2,0,rows-1);
       Ncol[idx]=gcc; Nrow[idx]=gcr; Ti[idx]=Ti[gcr*cols+gcc];  // цвет = как у этой части фото
-      var jf=pd*(0.4+dc*0.06);
+      var jf=pd*(0.5+dc*0.07);
       Tx[idx]=gridX+rx2*pd+half+rnd(-1,1)*jf; Ty[idx]=gridY+ry2*pd+half+rnd(-1,1)*jf;
-      FRot[idx]=rnd(-0.5,0.5)*Math.min(1,dc/8);
-      FAlpha[idx]=clamp(keepP*1.05,0.12,1);
+      FRot[idx]=rnd(-0.6,0.6);
+      FAlpha[idx]=CONFIG.HALO_ALPHA||0.88;                     // каждая плитка — чёткое фото, не фейд
       Typ[idx]=2; idx++;
     }
   }
