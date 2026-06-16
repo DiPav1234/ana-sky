@@ -53,6 +53,11 @@
 <body>
   <canvas id="scene"></canvas>
 
+  <div id="caption">
+    <h1 id="capH"></h1>
+    <p id="capP"></p>
+  </div>
+
   <button id="replay" class="ctl" aria-label="Собрать заново">собрать заново</button>
   <div id="loader">собираю небо…</div>
 
@@ -83,6 +88,7 @@ var CONFIG = {
   DROP_MS: 780,                  // падение стопки «на стол»
   BOOM_MS: 340,                  // вспышка-БУМ при ударе
   ASSEMBLE_MS: 2300, PIECE_MS: 900,
+  HOVER_SCALE: 3.0,              // во сколько раз растёт фото под курсором при ховере
 
   EDGE_THIN: 0.24,     // глубина «осыпания» края фото внутрь (доля от cols)
   BOUNDARY_DENS: 0.40, // плотность у самого края (меньше = край сильнее осыпан, линии нет)
@@ -102,6 +108,10 @@ var RM = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: red
 
 var cv=document.getElementById("scene"), ctx=cv.getContext("2d");
 var replayBtn=document.getElementById("replay"), loader=document.getElementById("loader");
+var capWrap=document.getElementById("caption"), capH=document.getElementById("capH"), capP=document.getElementById("capP");
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+capH.innerHTML=CONFIG.HEADLINE.split("\n").map(esc).join("<br>");
+capP.textContent=CONFIG.SUBLINE;
 
 var dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1)), W=0,H=0;
 function isMobile(){ return Math.min(window.innerWidth,window.innerHeight)<620; }
@@ -123,7 +133,7 @@ var Ncol,Nrow,Ti,Tx,Ty,Sx,Sy,Rot,Scl,Del,Typ,FRot,FAlpha,nCells=0; // Typ: 0 dro
 var frayList=[];
 var appearAt=[],shStart=[],shOff=[],shRot=[],showLong=0,driftAmp=0;
 var stackX=0,stackY=0,floorY=0,dropStart=0,boomAt=0;
-var loupeOn=false,loupeX=0,loupeY=0;
+var hoverI=-1, drawI=-1, hScale=1;
 var amb=[], fall=[];
 var ASSEMBLE_START=0,assembleDur=0,settleAt=0;
 var stars=[],bgGrad=null;
@@ -362,23 +372,30 @@ function drawPortrait(t){
 }
 
 /* ---------- ЛУПА-ПИПЕТКА: ховер увеличивает фото-пиксели под курсором ---------- */
-function drawLoupe(){
-  if(!loupeOn || !finalCv) return;
-  var R=Math.min(W,H)*0.14, Z=3.2, mx=loupeX, my=loupeY, pd=cell*dpr, sw=2*R/Z, reach=sw/2+pd;
-  ctx.save();
-  ctx.beginPath(); ctx.arc(mx,my,R,0,6.2832); ctx.clip();
-  ctx.fillStyle=bgGrad; ctx.fillRect(mx-R,my-R,2*R,2*R);   // фон под лупой (сквозь просветы — небо)
+/* какая плитка под курсором (ближайшая в пределах ~ячейки) */
+function findCell(mx,my){
+  if(!nCells) return -1;
+  var pd=cell*dpr, bd=pd*pd*1.3, best=-1;
   for(var i=0;i<nCells;i++){ if(Typ[i]===0) continue;
-    if(Math.abs(Tx[i]-mx)>reach || Math.abs(Ty[i]-my)>reach) continue;
-    var x=mx+(Tx[i]-mx)*Z, y=my+(Ty[i]-my)*Z, S=pd*Z, src=tiles[Ti[i]];
-    ctx.save(); ctx.globalAlpha=FAlpha[i]; ctx.translate(x,y); if(FRot[i]) ctx.rotate(FRot[i]);
-    ctx.drawImage(src,0,0,src.width,src.height,-S/2,-S/2,S,S); ctx.restore();
+    var dx=Tx[i]-mx, dy=Ty[i]-my, d=dx*dx+dy*dy;
+    if(d<bd){ bd=d; best=i; }
   }
-  ctx.restore();
-  ctx.beginPath(); ctx.arc(mx,my,R,0,6.2832);
-  ctx.lineWidth=2.5*dpr; ctx.strokeStyle="rgba(255,255,255,0.9)";
-  ctx.shadowColor="rgba(0,0,0,0.45)"; ctx.shadowBlur=14*dpr; ctx.stroke();
-  ctx.shadowColor="transparent"; ctx.shadowBlur=0;
+  return best;
+}
+/* ХОВЕР: фото под курсором ПЛАВНО увеличивается, при уходе — плавно уменьшается назад */
+function drawHover(){
+  var HS=CONFIG.HOVER_SCALE||2.8;
+  if(hoverI>=0){ drawI=hoverI; hScale+=(HS-hScale)*0.22; }   // растём
+  else { hScale+=(1-hScale)*0.22; }                          // уменьшаемся назад
+  if(drawI>=0 && hScale>1.02){
+    var pd=cell*dpr, S=pd*hScale, src=tiles[Ti[drawI]];       // настоящее чёткое фото неба
+    ctx.save(); ctx.translate(Tx[drawI],Ty[drawI]); if(FRot[drawI]) ctx.rotate(FRot[drawI]);
+    ctx.shadowColor="rgba(0,0,0,0.5)"; ctx.shadowBlur=10*dpr; ctx.shadowOffsetY=3*dpr;
+    ctx.drawImage(src,0,0,src.width,src.height,-S/2,-S/2,S,S);
+    ctx.shadowColor="transparent"; ctx.shadowBlur=0; ctx.shadowOffsetY=0;
+    ctx.lineWidth=2*dpr; ctx.strokeStyle="rgba(255,255,255,0.85)"; ctx.strokeRect(-S/2,-S/2,S,S);
+    ctx.restore();
+  } else { drawI=-1; hScale=1; }
 }
 
 /* ---------- кадр ---------- */
@@ -405,26 +422,26 @@ function frame(now){
   else { settled=true; drawPortrait(t); if(!captionShown) showCaption(); }
 
   drawFall(now, atm, dt);  // падающий оверлей — поверх всего
-  if(settled) drawLoupe(); // лупа-пипетка после сборки
+  if(settled) drawHover(); // ховер увеличивает фото под курсором
   raf=requestAnimationFrame(frame);
 }
-function showCaption(){ captionShown=true; replayBtn.classList.add("show"); }
+function showCaption(){ captionShown=true; capWrap.classList.add("show"); replayBtn.classList.add("show"); }
 
 /* ---------- запуск / ресайз ---------- */
 function start(){
   if(raf) cancelAnimationFrame(raf);
   seedShowcase(); seedAssembly(); makeAmbient(); makeFall();
   startT=null; captionShown=false; settled=false;
-  replayBtn.classList.remove("show");
+  capWrap.classList.remove("show"); replayBtn.classList.remove("show");
   raf=requestAnimationFrame(frame);
 }
 function showStill(){
   if(raf) cancelAnimationFrame(raf);
   seedShowcase(); makeAmbient(); makeFall();
-  captionShown=true; settled=true; replayBtn.classList.add("show");
+  captionShown=true; settled=true; capWrap.classList.add("show"); replayBtn.classList.add("show");
   startT=null; lastNow=0;
   (function idle(now){ if(lastNow===0)lastNow=now; var dt=clamp(now-lastNow,0,50); lastNow=now;
-    drawBg(now); drawAmbient(now,0.95); drawPortrait(now); drawFall(now,1,dt); drawLoupe(); raf=requestAnimationFrame(idle); })(performance.now());
+    drawBg(now); drawAmbient(now,0.95); drawPortrait(now); drawFall(now,1,dt); drawHover(); raf=requestAnimationFrame(idle); })(performance.now());
 }
 function sizeCanvas(){ var cssW=window.innerWidth,cssH=window.innerHeight;
   W=Math.round(cssW*dpr); H=Math.round(cssH*dpr); cv.width=W; cv.height=H; cv.style.width=cssW+"px"; cv.style.height=cssH+"px"; }
@@ -435,10 +452,11 @@ window.addEventListener("resize", function(){ if(rzTimer)clearTimeout(rzTimer); 
 cv.addEventListener("click", function(){ start(); });
 replayBtn.addEventListener("click", function(e){ e.stopPropagation(); start(); });
 cv.addEventListener("mousemove", function(e){
+  if(!settled){ hoverI=-1; return; }
   var r=cv.getBoundingClientRect();
-  loupeX=(e.clientX-r.left)*dpr; loupeY=(e.clientY-r.top)*dpr; loupeOn=true;
+  hoverI=findCell((e.clientX-r.left)*dpr, (e.clientY-r.top)*dpr);
 });
-cv.addEventListener("mouseleave", function(){ loupeOn=false; });
+cv.addEventListener("mouseleave", function(){ hoverI=-1; });
 
 /* ---------- инициализация ---------- */
 Promise.all([
