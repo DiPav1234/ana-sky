@@ -53,11 +53,6 @@
 <body>
   <canvas id="scene"></canvas>
 
-  <div id="caption">
-    <h1 id="capH"></h1>
-    <p id="capP"></p>
-  </div>
-
   <button id="replay" class="ctl" aria-label="Собрать заново">собрать заново</button>
   <div id="loader">собираю небо…</div>
 
@@ -84,9 +79,10 @@ var CONFIG = {
   SHOWCASE_STAGGER: 300, SHOWCASE_GROW: 900, SHOWCASE_HOLD: 650, SHOWCASE_SIZE: 0.32,
   ASSEMBLE_MS: 2300, PIECE_MS: 900,
 
-  CORE_R: 0.80,   // внутри — плотный портрет
-  FRAY_R: 1.28,   // до сюда края рассыпаются отдельными фото
-  FRAY_MAX: { desktop: 2200, mobile: 900 },
+  CORE_R: 0.62,    // плотное ядро (дальше широко и плавно тает — без чёткого круга)
+  CORE_FADE: 1.16, // докуда ядро растворяется
+  FRAY_R: 1.40,    // докуда края рассыпаются фото (с нахлёстом на спад ядра — без зазора)
+  FRAY_MAX: { desktop: 3000, mobile: 1200 },
 
   AMBIENT_N: { desktop: 210, mobile: 90 },  // фото-поток по всей странице (сзади)
   FALL_N:    { desktop: 64,  mobile: 28 },  // падающие фото-оверлей (сверху)
@@ -99,13 +95,7 @@ var DATA = window.MOSAIC_DATA || {tiles:[],target:""};
 var RM = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
 var cv=document.getElementById("scene"), ctx=cv.getContext("2d");
-var capWrap=document.getElementById("caption"), capH=document.getElementById("capH"),
-    capP=document.getElementById("capP"), replayBtn=document.getElementById("replay"),
-    loader=document.getElementById("loader");
-
-function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-capH.innerHTML=CONFIG.HEADLINE.split("\n").map(esc).join("<br>");
-capP.textContent=CONFIG.SUBLINE;
+var replayBtn=document.getElementById("replay"), loader=document.getElementById("loader");
 
 var dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1)), W=0,H=0;
 function isMobile(){ return Math.min(window.innerWidth,window.innerHeight)<620; }
@@ -194,10 +184,10 @@ function buildAtlas(){
       var keep = Math.random() < (1-Math.pow(ef,1.25)); // фото редеют порядком
       if(keep){
         Typ[idx]=2;
-        var jit=ef*pd*2.4;
+        var jit=ef*pd*1.6;
         Tx[idx]=cx+rnd(-1,1)*jit; Ty[idx]=cy+rnd(-1,1)*jit;
         FRot[idx]=rnd(-0.55,0.55)*ef;
-        FAlpha[idx]=clamp(1-ef*0.7,0.25,1);
+        FAlpha[idx]=clamp(1-ef*0.6,0.3,1);
         frayList.push(idx);
       } else Typ[idx]=0;
     } else Typ[idx]=0;
@@ -216,8 +206,8 @@ function buildAtlas(){
   var cc=core.getContext("2d"); cc.drawImage(atlas,0,0);
   cc.globalCompositeOperation="destination-in";
   var aw=core.width,ah=core.height,R=Math.max(aw,ah)/2;
-  var g2=cc.createRadialGradient(aw/2,ah/2,R*(CR*0.5), aw/2,ah/2,R*(CR*0.62+0.16));
-  g2.addColorStop(0,"rgba(0,0,0,1)"); g2.addColorStop(0.7,"rgba(0,0,0,0.95)"); g2.addColorStop(1,"rgba(0,0,0,0)");
+  var g2=cc.createRadialGradient(aw/2,ah/2,R*CONFIG.CORE_R, aw/2,ah/2,R*CONFIG.CORE_FADE);
+  g2.addColorStop(0,"rgba(0,0,0,1)"); g2.addColorStop(0.6,"rgba(0,0,0,0.9)"); g2.addColorStop(1,"rgba(0,0,0,0)");
   cc.fillStyle=g2; cc.fillRect(0,0,aw,ah); cc.globalCompositeOperation="source-over";
 }
 
@@ -353,20 +343,20 @@ function frame(now){
   drawFall(now, atm, dt);  // падающий оверлей — поверх всего
   raf=requestAnimationFrame(frame);
 }
-function showCaption(){ captionShown=true; capWrap.classList.add("show"); replayBtn.classList.add("show"); }
+function showCaption(){ captionShown=true; replayBtn.classList.add("show"); }
 
 /* ---------- запуск / ресайз ---------- */
 function start(){
   if(raf) cancelAnimationFrame(raf);
   seedShowcase(); seedAssembly(); makeAmbient(); makeFall();
   startT=null; captionShown=false; settled=false;
-  capWrap.classList.remove("show"); replayBtn.classList.remove("show");
+  replayBtn.classList.remove("show");
   raf=requestAnimationFrame(frame);
 }
 function showStill(){
   if(raf) cancelAnimationFrame(raf);
   seedShowcase(); makeAmbient(); makeFall();
-  captionShown=true; settled=true; capWrap.classList.add("show"); replayBtn.classList.add("show");
+  captionShown=true; settled=true; replayBtn.classList.add("show");
   startT=null; lastNow=0;
   (function idle(now){ if(lastNow===0)lastNow=now; var dt=clamp(now-lastNow,0,50); lastNow=now;
     drawBg(now); drawAmbient(now,0.95); drawPortrait(now); drawFall(now,1,dt); raf=requestAnimationFrame(idle); })(performance.now());
