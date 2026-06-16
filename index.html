@@ -79,11 +79,12 @@ var CONFIG = {
   SHOWCASE_STAGGER: 300, SHOWCASE_GROW: 900, SHOWCASE_HOLD: 650, SHOWCASE_SIZE: 0.32,
   ASSEMBLE_MS: 2300, PIECE_MS: 900,
 
-  CORE_R: 0.72,    // плотное ядро (дальше края редеют/рассыпаются)
-  FRAY_R: 1.40,    // докуда края рассыпаются фото
-  FRAY_MAX: { desktop: 3000, mobile: 1200 },
+  CORE_R: 0.64,    // плотное ядро (она). дальше — края разлетаются наружу
+  FRAY_R: 1.46,    // докуда края рассыпаются фото
+  DISPERSE: 4.4,   // насколько края «выдувает» наружу (больше = воздушнее/распылённее)
+  FRAY_MAX: { desktop: 4600, mobile: 1900 },
 
-  AMBIENT_N: { desktop: 200, mobile: 90 },  // фото-поток по всей странице (сзади)
+  AMBIENT_N: { desktop: 260, mobile: 110 },  // фото-поток по всей странице (сзади)
   FALL_N:    { desktop: 30,  mobile: 14 },  // падающие фото-оверлей (сверху) — деликатно
 
   BG_STOPS: [[0.00,"#2a3f72"],[0.34,"#5d5188"],[0.58,"#a6627e"],[0.78,"#e08a63"],[1.00,"#ffc88c"]]
@@ -167,7 +168,8 @@ function buildAtlas(){
   Typ=new Uint8Array(nCells);FRot=new Float32Array(nCells);FAlpha=new Float32Array(nCells);
   frayList=[];
   var op=CONFIG.TILE_OPACITY, idx=0, pd=cell*dpr;
-  var CR=CONFIG.CORE_R, FR=CONFIG.FRAY_R;
+  var CR=CONFIG.CORE_R, FR=CONFIG.FRAY_R, DISP=CONFIG.DISPERSE||3;
+  var pcx=gridX+mW/2, pcy=gridY+mH/2;   // центр портрета — от него разлёт наружу
   for(var ry=0;ry<rows;ry++){ for(var rx=0;rx<cols;rx++){
     var p=(ry*cols+rx)*4, r=data[p],g=data[p+1],b=data[p+2];
     var ti=pickTile(r,g,b), dx=rx*ac, dy=ry*ac;
@@ -180,13 +182,16 @@ function buildAtlas(){
     if(dn<=CR){ Typ[idx]=1; Tx[idx]=cx; Ty[idx]=cy; FRot[idx]=0; FAlpha[idx]=1; }
     else if(dn<=FR){
       var ef=(dn-CR)/(FR-CR);                 // 0..1 к краю
-      var keep = Math.random() < (1-Math.pow(ef,1.25)); // фото редеют порядком
+      var keep = Math.random() < (1-Math.pow(ef,1.45)); // фото редеют порядком (плавнее)
       if(keep){
         Typ[idx]=2;
-        var jit=ef*pd*1.6;
-        Tx[idx]=cx+rnd(-1,1)*jit; Ty[idx]=cy+rnd(-1,1)*jit;
-        FRot[idx]=rnd(-0.55,0.55)*ef;
-        FAlpha[idx]=clamp(1-ef*0.6,0.3,1);
+        // разлёт НАРУЖУ от центра (как стрелки) + лёгкая случайность => распыление
+        var ddx=cx-pcx, ddy=cy-pcy, dl=Math.sqrt(ddx*ddx+ddy*ddy)||1;
+        var push=ef*pd*DISP, jr=ef*pd*1.5;
+        Tx[idx]=cx+(ddx/dl)*push+rnd(-1,1)*jr;
+        Ty[idx]=cy+(ddy/dl)*push+rnd(-1,1)*jr;
+        FRot[idx]=rnd(-0.6,0.6)*ef;
+        FAlpha[idx]=clamp(1-ef*0.7,0.2,1);
         frayList.push(idx);
       } else Typ[idx]=0;
     } else Typ[idx]=0;
@@ -203,7 +208,7 @@ function buildAtlas(){
   // запекаем ФИНАЛЬНЫЙ собранный кадр в один статичный canvas.
   // он 1:1 совпадает с последним кадром сборки (те же позиции/поворот/прозрачность),
   // поэтому переход «сборка -> собрано» без рывка, и он статичен -> ничего не дёргается.
-  var half=pd/2, mg=3*pd;
+  var half=pd/2, mg=Math.ceil((DISP+2.5)*pd);
   finalX0=gridX-mg; finalY0=gridY-mg;
   finalCv=document.createElement("canvas");
   finalCv.width=Math.ceil(mW+2*mg); finalCv.height=Math.ceil(mH+2*mg);
