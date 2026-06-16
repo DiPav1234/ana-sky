@@ -79,10 +79,10 @@ var CONFIG = {
   SHOWCASE_STAGGER: 300, SHOWCASE_GROW: 900, SHOWCASE_HOLD: 650, SHOWCASE_SIZE: 0.32,
   ASSEMBLE_MS: 2300, PIECE_MS: 900,
 
-  HALO_EXP: 0.85,     // как далеко тянется хвост ореола (больше = шире)
-  HALO_FALLOFF: 0.22, // на сколько вглубь редеет рассыпь
-  HALO_EDGE: 0.42,    // плотность рассыпи у края (<1 => просветы, это РАССЫПЬ, а не фейд-рамка)
-  HALO_ALPHA: 0.88,   // каждая плитка-рассыпь — ЧЁТКАЯ фотка (не полупрозрачный фейд)
+  EDGE_THIN: 0.18,     // глубина «осыпания» края фото внутрь (доля от cols)
+  BOUNDARY_DENS: 0.45, // плотность у самого края (меньше = край сильнее осыпан, линии нет)
+  HALO_EXP: 0.85,      // как далеко тянется хвост рассыпи (шире)
+  HALO_FALLOFF: 0.18,  // как быстро редеет рассыпь наружу
   HALO_CAP: { desktop: 8500, mobile: 3800 },
 
   AMBIENT_N: { desktop: 260, mobile: 110 },  // фото-поток по всей странице (сзади)
@@ -168,18 +168,21 @@ function buildAtlas(){
   Rot=new Float32Array(cap);Scl=new Float32Array(cap);Del=new Float32Array(cap);
   Typ=new Uint8Array(cap);FRot=new Float32Array(cap);FAlpha=new Float32Array(cap);
   var op=CONFIG.TILE_OPACITY, pd=cell*dpr, half=pd/2, idx=0;
-  var EDGE=CONFIG.EDGE_SOFT||0.06;
+  var BD=CONFIG.BOUNDARY_DENS||0.45;
+  var RING=Math.max(2, cols*(CONFIG.EDGE_THIN||0.18));   // глубина «осыпания» края внутрь фото
 
-  // 1) ЦЕЛАЯ ЧЁТКАЯ ФОТКА — плотная сетка, ничего не растаскиваем
+  // 1) ФОТО: центр ПЛОТНЫЙ/ЧЁТКИЙ, наружное кольцо ОСЫПАЕТСЯ дырками (без прозрачности),
+  //    плотность плавно падает 1 -> BD к краю. В атлас пишем ВСЕ ячейки (это источник цвета).
   for(var ry=0;ry<rows;ry++){ for(var rx=0;rx<cols;rx++){
     var p=(ry*cols+rx)*4, r=data[p],g=data[p+1],b=data[p+2];
     var ti=pickTile(r,g,b), dx=rx*ac, dy=ry*ac;
     ax.globalAlpha=1; ax.fillStyle="rgb("+(r|0)+","+(g|0)+","+(b|0)+")"; ax.fillRect(dx,dy,ac,ac);
     ax.globalAlpha=op; ax.drawImage(tiles[ti],0,0,tiles[ti].width,tiles[ti].height,dx,dy,ac,ac); ax.globalAlpha=1;
+    var di=Math.min(rx+0.5, cols-0.5-rx, ry+0.5, rows-0.5-ry);   // расстояние до края, в ячейках
+    if(di<RING && Math.random()>=(BD+(1-BD)*(di/RING))) continue; // осыпаем край дырками (без фейда)
     Ncol[idx]=rx; Nrow[idx]=ry; Ti[idx]=ti;
-    Tx[idx]=gridX+rx*pd+half; Ty[idx]=gridY+ry*pd+half; FRot[idx]=0;
-    FAlpha[idx]=1;                      // фото ЦЕЛОЕ и ЧЁТКОЕ — никакого фейда по краю
-    Typ[idx]=1; idx++;
+    Tx[idx]=gridX+rx*pd+half; Ty[idx]=gridY+ry*pd+half;
+    FRot[idx]=0; FAlpha[idx]=1; Typ[idx]=1; idx++;
   }}
 
   // 2) ОРЕОЛ: ПРОДОЛЖАЕМ сетку наружу с той же плотностью у края и плавно (экспонентой)
@@ -196,14 +199,14 @@ function buildAtlas(){
       // нерегулярная глубина ореола по направлению => плюмы/клочья, а не ровный прямоугольник
       var ang=Math.atan2(ry2-ccy, rx2-ccx);
       var wob=0.45 + 0.55*(0.5+0.5*Math.sin(ang*3.0+0.7)) + 0.35*(0.5+0.5*Math.sin(ang*7.0+2.1));
-      var dens=Math.min(CONFIG.HALO_EDGE||0.42, Math.exp(-dc/(FO*wob)));
-      if(Math.random()>=dens) continue;                        // ДИСКРЕТНАЯ рассыпь с просветами (не фейд)
+      var dens=BD*Math.exp(-dc/(FO*wob));                      // у края = BD (как у фото) -> НЕПРЕРЫВНО, без линии
+      if(Math.random()>=dens) continue;                        // дискретная рассыпь чётких плиток
       var gcc=clamp(rx2,0,cols-1), gcr=clamp(ry2,0,rows-1);
       Ncol[idx]=gcc; Nrow[idx]=gcr; Ti[idx]=Ti[gcr*cols+gcc];  // цвет = как у этой части фото
-      var jf=pd*(0.5+dc*0.07);
+      var jf=pd*(0.45+dc*0.07);
       Tx[idx]=gridX+rx2*pd+half+rnd(-1,1)*jf; Ty[idx]=gridY+ry2*pd+half+rnd(-1,1)*jf;
       FRot[idx]=rnd(-0.6,0.6);
-      FAlpha[idx]=CONFIG.HALO_ALPHA||0.88;                     // каждая плитка — чёткое фото, не фейд
+      FAlpha[idx]=1;                                           // чёткая плитка, без фейда
       Typ[idx]=2; idx++;
     }
   }
