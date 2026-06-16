@@ -76,7 +76,12 @@ var CONFIG = {
   TILE_OPACITY: 0.5,
   CELL_BUDGET: { desktop: 6800, mobile: 2600 },
 
-  SHOWCASE_STAGGER: 300, SHOWCASE_GROW: 900, SHOWCASE_HOLD: 650, SHOWCASE_SIZE: 0.32,
+  SHOWCASE_SIZE: 0.30,           // размер крупных фото в начале
+  GATHER_STAGGER: 120,           // пауза между прилётами фото в стопку
+  GATHER_GROW: 520,              // время прилёта одного фото
+  STACK_HOLD: 320,               // пауза собранной стопки перед падением
+  DROP_MS: 780,                  // падение стопки «на стол»
+  BOOM_MS: 340,                  // вспышка-БУМ при ударе
   ASSEMBLE_MS: 2300, PIECE_MS: 900,
 
   EDGE_THIN: 0.24,     // глубина «осыпания» края фото внутрь (доля от cols)
@@ -116,7 +121,9 @@ var cols=0,rows=0,cell=0,gridX=0,gridY=0,mW=0,mH=0;
 var atlas=null,finalCv=null,finalX0=0,finalY0=0,ac=0;
 var Ncol,Nrow,Ti,Tx,Ty,Sx,Sy,Rot,Scl,Del,Typ,FRot,FAlpha,nCells=0; // Typ: 0 drop,1 core,2 fray
 var frayList=[];
-var anchX=[],anchY=[],appearAt=[],rotBase=[],showLong=0,driftAmp=0;
+var appearAt=[],shStart=[],shOff=[],shRot=[],showLong=0,driftAmp=0;
+var stackX=0,stackY=0,floorY=0,dropStart=0,boomAt=0;
+var loupeOn=false,loupeX=0,loupeY=0;
 var amb=[], fall=[];
 var ASSEMBLE_START=0,assembleDur=0,settleAt=0;
 var stars=[],bgGrad=null;
@@ -265,41 +272,66 @@ function drawFall(t,gA,dt){
   }
 }
 
-/* ---------- показ фото по одному ---------- */
+/* ---------- ИНТРО: фото слетаются в стопку -> падают «на стол» -> БУМ ---------- */
 function seedShowcase(){
-  anchX=[];anchY=[];appearAt=[];rotBase=[];
-  var cx=W/2,cy=gridY+mH/2,spread=Math.min(W,H)*0.30;
+  appearAt=[]; shStart=[]; shOff=[]; shRot=[];
   showLong=Math.min(W,H)*CONFIG.SHOWCASE_SIZE; driftAmp=Math.min(W,H)*0.018;
+  stackX=W/2; stackY=H*0.40;            // куда собирается стопка
+  floorY=H*0.82;                        // «стол», куда падает
+  var mn=Math.min(W,H);
   var order=[];for(var i=0;i<16;i++)order.push(i);
   for(var i=order.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=order[i];order[i]=order[j];order[j]=t;}
-  for(var k=0;k<16;k++){ var rr=(k+0.6)/16,ang=k*2.399963;
-    anchX[k]=cx+Math.cos(ang)*spread*Math.sqrt(rr); anchY[k]=cy+Math.sin(ang)*spread*Math.sqrt(rr)*0.92;
-    rotBase[k]=rnd(-0.18,0.18); appearAt[order[k]]=k*CONFIG.SHOWCASE_STAGGER; }
-  ASSEMBLE_START=(16-1)*CONFIG.SHOWCASE_STAGGER+CONFIG.SHOWCASE_GROW+CONFIG.SHOWCASE_HOLD;
+  for(var k=0;k<16;k++){
+    var id=order[k];
+    appearAt[id]=k*CONFIG.GATHER_STAGGER;
+    var edge=Math.floor(rnd(0,4)), sx,sy;          // прилетают из-за края экрана
+    if(edge===0){ sx=rnd(-0.2,1.2)*W; sy=-0.35*H; }
+    else if(edge===1){ sx=rnd(-0.2,1.2)*W; sy=1.35*H; }
+    else if(edge===2){ sx=-0.35*W; sy=rnd(-0.2,1.2)*H; }
+    else { sx=1.35*W; sy=rnd(-0.2,1.2)*H; }
+    shStart[id]=[sx,sy];
+    shOff[id]=[rnd(-0.08,0.08)*mn, rnd(-0.07,0.07)*mn];   // смещение в стопке (пилообразно)
+    shRot[id]=rnd(-0.17,0.17);
+  }
+  var GATHER=(16-1)*CONFIG.GATHER_STAGGER+CONFIG.GATHER_GROW;
+  dropStart=GATHER+CONFIG.STACK_HOLD;
+  ASSEMBLE_START=dropStart+CONFIG.DROP_MS;
+  boomAt=ASSEMBLE_START;
   assembleDur=CONFIG.ASSEMBLE_MS+CONFIG.PIECE_MS+250; settleAt=ASSEMBLE_START+assembleDur;
 }
-function showcasePos(i,t){ return [anchX[i]+Math.sin(t*0.0004+i*1.7)*driftAmp, anchY[i]+Math.cos(t*0.00033+i*1.3)*driftAmp]; }
 function drawShowcase(t,gA){
+  var fallY=0, fallRot=0;
+  if(t>dropStart){ var dp=clamp((t-dropStart)/CONFIG.DROP_MS,0,1), e2=dp*dp; fallY=(floorY-stackY)*e2; fallRot=0.05*e2; }
   for(var i=0;i<16;i++){ var ap=t-appearAt[i]; if(ap<=0) continue;
-    var e=easeOutCubic(clamp(ap/CONFIG.SHOWCASE_GROW,0,1)), al=e*gA; if(al<=0.01) continue;
-    var pos=showcasePos(i,t), sc=0.7+0.3*e, rot=rotBase[i]+Math.sin(t*0.0003+i)*0.04, S=showLong*sc;
-    ctx.save(); ctx.globalAlpha=al; ctx.translate(pos[0],pos[1]); ctx.rotate(rot);
-    ctx.shadowColor="rgba(0,0,0,0.45)"; ctx.shadowBlur=20*dpr; ctx.shadowOffsetY=6*dpr;
+    var e=easeOutCubic(clamp(ap/CONFIG.GATHER_GROW,0,1));
+    var tx=stackX+shOff[i][0], ty=stackY+shOff[i][1];
+    var x=shStart[i][0]+(tx-shStart[i][0])*e, y=shStart[i][1]+(ty-shStart[i][1])*e + fallY;
+    var rot=shRot[i]+fallRot, sc=0.85+0.15*e, S=showLong*sc, al=clamp(e,0,1)*gA;
+    if(al<=0.01) continue;
+    ctx.save(); ctx.globalAlpha=al; ctx.translate(x,y); ctx.rotate(rot);
+    ctx.shadowColor="rgba(0,0,0,0.5)"; ctx.shadowBlur=22*dpr; ctx.shadowOffsetY=(8+fallY*0.02)*dpr;
     var bi=bigTiles[i]||tiles[i];
     ctx.drawImage(bi,0,0,bi.width,bi.height,-S/2,-S/2,S,S);
     ctx.shadowColor="transparent"; ctx.shadowBlur=0; ctx.shadowOffsetY=0;
-    ctx.lineWidth=Math.max(1,1.2*dpr); ctx.strokeStyle="rgba(255,255,255,0.16)"; ctx.strokeRect(-S/2,-S/2,S,S);
+    ctx.lineWidth=Math.max(1,2*dpr); ctx.strokeStyle="rgba(255,255,255,0.55)"; ctx.strokeRect(-S/2,-S/2,S,S);
     ctx.restore(); }
   ctx.globalAlpha=1;
+}
+function drawBoom(bt){
+  var a=clamp(1-bt/CONFIG.BOOM_MS,0,1); if(a<=0) return;
+  var r=Math.min(W,H)*(0.18+0.7*(bt/CONFIG.BOOM_MS));
+  var g=ctx.createRadialGradient(stackX,floorY,0, stackX,floorY,r);
+  g.addColorStop(0,"rgba(255,250,240,"+(a*0.75)+")"); g.addColorStop(1,"rgba(255,250,240,0)");
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
 }
 
 /* ---------- сборка ---------- */
 function seedAssembly(){
-  var cx=W/2,cy=gridY+mH/2,maxDist=Math.sqrt((mW/2)*(mW/2)+(mH/2)*(mH/2))||1, jit=showLong*0.42;
+  var cx=W/2,cy=gridY+mH/2,maxDist=Math.sqrt((mW/2)*(mW/2)+(mH/2)*(mH/2))||1;
+  var ix=stackX, iy=floorY, jit=Math.min(W,H)*0.10;   // взрыв из точки удара (центр-низ)
   for(var i=0;i<nCells;i++){ if(Typ[i]===0) continue;
-    var ti=Ti[i];
-    Sx[i]=anchX[ti]+rnd(-1,1)*jit; Sy[i]=anchY[ti]+rnd(-1,1)*jit;
-    Scl[i]=rnd(2.4,5.0); Rot[i]=rnd(-0.5,0.5);
+    Sx[i]=ix+rnd(-1,1)*jit; Sy[i]=iy+rnd(-1,1)*jit;
+    Scl[i]=rnd(2.4,5.0); Rot[i]=rnd(-0.6,0.6);
     var dx=Tx[i]-cx,dy=Ty[i]-cy,rank=clamp(Math.sqrt(dx*dx+dy*dy)/maxDist,0,1);
     Del[i]=CONFIG.ASSEMBLE_MS*Math.pow(rank,1.7)+rnd(0,90);
   }
@@ -329,6 +361,26 @@ function drawPortrait(t){
   ctx.drawImage(finalCv, finalX0, finalY0);
 }
 
+/* ---------- ЛУПА-ПИПЕТКА: ховер увеличивает фото-пиксели под курсором ---------- */
+function drawLoupe(){
+  if(!loupeOn || !finalCv) return;
+  var R=Math.min(W,H)*0.14, Z=3.2, mx=loupeX, my=loupeY, pd=cell*dpr, sw=2*R/Z, reach=sw/2+pd;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(mx,my,R,0,6.2832); ctx.clip();
+  ctx.fillStyle=bgGrad; ctx.fillRect(mx-R,my-R,2*R,2*R);   // фон под лупой (сквозь просветы — небо)
+  for(var i=0;i<nCells;i++){ if(Typ[i]===0) continue;
+    if(Math.abs(Tx[i]-mx)>reach || Math.abs(Ty[i]-my)>reach) continue;
+    var x=mx+(Tx[i]-mx)*Z, y=my+(Ty[i]-my)*Z, S=pd*Z, src=tiles[Ti[i]];
+    ctx.save(); ctx.globalAlpha=FAlpha[i]; ctx.translate(x,y); if(FRot[i]) ctx.rotate(FRot[i]);
+    ctx.drawImage(src,0,0,src.width,src.height,-S/2,-S/2,S,S); ctx.restore();
+  }
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(mx,my,R,0,6.2832);
+  ctx.lineWidth=2.5*dpr; ctx.strokeStyle="rgba(255,255,255,0.9)";
+  ctx.shadowColor="rgba(0,0,0,0.45)"; ctx.shadowBlur=14*dpr; ctx.stroke();
+  ctx.shadowColor="transparent"; ctx.shadowBlur=0;
+}
+
 /* ---------- кадр ---------- */
 function frame(now){
   if(startT==null){ startT=now; lastNow=now; }
@@ -344,10 +396,16 @@ function frame(now){
     drawFall(now, atm, dt); raf=requestAnimationFrame(frame); return;
   }
   if(t<ASSEMBLE_START){ drawShowcase(t,1); }
-  else if(t<settleAt){ var bt=t-ASSEMBLE_START, sf=clamp(1-bt/650,0,1); if(sf>0) drawShowcase(t,sf); drawAssembly(bt); }
+  else if(t<settleAt){
+    var bt=t-ASSEMBLE_START, sf=clamp(1-bt/300,0,1);
+    if(sf>0) drawShowcase(t,sf);            // стопка догорает
+    drawAssembly(bt);
+    if(bt<CONFIG.BOOM_MS) drawBoom(bt);     // БУМ при ударе
+  }
   else { settled=true; drawPortrait(t); if(!captionShown) showCaption(); }
 
   drawFall(now, atm, dt);  // падающий оверлей — поверх всего
+  if(settled) drawLoupe(); // лупа-пипетка после сборки
   raf=requestAnimationFrame(frame);
 }
 function showCaption(){ captionShown=true; replayBtn.classList.add("show"); }
@@ -366,7 +424,7 @@ function showStill(){
   captionShown=true; settled=true; replayBtn.classList.add("show");
   startT=null; lastNow=0;
   (function idle(now){ if(lastNow===0)lastNow=now; var dt=clamp(now-lastNow,0,50); lastNow=now;
-    drawBg(now); drawAmbient(now,0.95); drawPortrait(now); drawFall(now,1,dt); raf=requestAnimationFrame(idle); })(performance.now());
+    drawBg(now); drawAmbient(now,0.95); drawPortrait(now); drawFall(now,1,dt); drawLoupe(); raf=requestAnimationFrame(idle); })(performance.now());
 }
 function sizeCanvas(){ var cssW=window.innerWidth,cssH=window.innerHeight;
   W=Math.round(cssW*dpr); H=Math.round(cssH*dpr); cv.width=W; cv.height=H; cv.style.width=cssW+"px"; cv.style.height=cssH+"px"; }
@@ -376,6 +434,11 @@ var rzTimer=null;
 window.addEventListener("resize", function(){ if(rzTimer)clearTimeout(rzTimer); rzTimer=setTimeout(function(){ rebuild(); showStill(); },200); });
 cv.addEventListener("click", function(){ start(); });
 replayBtn.addEventListener("click", function(e){ e.stopPropagation(); start(); });
+cv.addEventListener("mousemove", function(e){
+  var r=cv.getBoundingClientRect();
+  loupeX=(e.clientX-r.left)*dpr; loupeY=(e.clientY-r.top)*dpr; loupeOn=true;
+});
+cv.addEventListener("mouseleave", function(){ loupeOn=false; });
 
 /* ---------- инициализация ---------- */
 Promise.all([
