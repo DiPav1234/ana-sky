@@ -9,7 +9,7 @@
 <meta name="description" content="">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%98%81%EF%B8%8F%3C/text%3E%3C/svg%3E">
 <style>
-  :root{ --ink:#eaf0ff; --soft:#aab6d6; --accent:#ff7aa2; }
+  :root{ --ink:#fff; --soft:#ffe9d8; --accent:#ff7aa2; }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:#2a3f72;overflow:hidden}
   body{ font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, Arial, sans-serif;
@@ -26,36 +26,32 @@
   #caption h1{
     margin:0 auto;max-width:24ch;font-size:clamp(20px,3.6vw,36px);font-weight:700;
     line-height:1.35;letter-spacing:.2px;font-style:italic;
-    text-shadow:0 2px 30px rgba(0,0,0,.7), 0 0 26px rgba(255,122,162,.22);
+    text-shadow:0 2px 30px rgba(0,0,0,.75), 0 0 26px rgba(0,0,0,.5);
   }
   #caption p{
     margin:.7em auto 0;font-size:clamp(12px,2.2vw,16px);letter-spacing:.18em;
-    color:rgba(255,246,238,.94);text-shadow:0 2px 18px rgba(0,0,0,.75);
+    color:var(--soft);text-shadow:0 2px 18px rgba(0,0,0,.8);
   }
 
   .ctl{
-    position:fixed;z-index:5;border:1px solid rgba(255,255,255,.16);
-    background:rgba(255,255,255,.05);color:var(--soft);
+    position:fixed;z-index:5;border:1px solid rgba(255,255,255,.22);
+    background:rgba(255,255,255,.08);color:#fff;
     border-radius:999px;cursor:pointer;backdrop-filter:blur(6px);
     font:inherit;font-size:12px;letter-spacing:.14em;text-transform:uppercase;
-    transition:.25s ease;opacity:0;
+    transition:.25s ease;opacity:0;text-shadow:0 1px 8px rgba(0,0,0,.5);
   }
   .ctl.show{opacity:1}
-  .ctl:hover,.ctl:focus-visible{outline:none;color:#fff;border-color:var(--accent);
-    box-shadow:0 0 22px rgba(255,122,162,.25)}
+  .ctl:hover,.ctl:focus-visible{outline:none;border-color:var(--accent);
+    box-shadow:0 0 22px rgba(255,122,162,.3)}
   #replay{bottom:14px;right:16px;padding:9px 16px}
 
-  #vig{position:fixed;inset:0;pointer-events:none;
-    background:radial-gradient(125% 95% at 50% 40%, rgba(0,0,0,0) 62%, rgba(0,0,0,.36) 100%)}
-
   #loader{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
-    color:var(--soft);font-size:13px;letter-spacing:.2em;text-transform:uppercase}
+    color:#ffe9d8;font-size:13px;letter-spacing:.2em;text-transform:uppercase}
   #loader.hide{opacity:0;transition:opacity .6s ease;pointer-events:none}
 </style>
 </head>
 <body>
   <canvas id="scene"></canvas>
-  <div id="vig"></div>
 
   <div id="caption">
     <h1 id="capH"></h1>
@@ -72,280 +68,289 @@
 
 /* =======================================================================
    НАСТРОЙКИ — РЕДАКТИРУЙ ЗДЕСЬ
-   • HEADLINE — подпись, проявляется после сборки. \n = перенос строки.
-   • SUBLINE  — маленькая подпись под ней.
+   • HEADLINE / SUBLINE — подпись (после сборки). \n = перенос строки.
    • TILE_OPACITY — насколько видны фото-неба поверх портрета (0.3..0.7).
-   • CELL_BUDGET — детализация (число кусочков).
-   • Тайминги анимации: SHOWCASE_* (медленный показ фото по одному),
-     ASSEMBLE_MS / PIECE_MS (разгон и сборка в портрет).
+   • CELL_BUDGET — детализация портрета (число кусочков).
+   • Тайминги: SHOWCASE_* (показ фото по одному), ASSEMBLE_MS/PIECE_MS (разгон+сборка).
+   • CORE_R/FRAY_R — где портрет плотный и где края «рассыпаются» фотографиями.
+   • AMBIENT_N / FALL_N — поток фото по всей странице / падающий оверлей сверху.
    ======================================================================= */
 var CONFIG = {
   HEADLINE: "В каждом закате, что нежно ловлю,\nв каждом мгновенье — тебя лишь люблю.",
   SUBLINE:  "Анечка ❤",
-  TILE_OPACITY: 0.52,
-  CELL_BUDGET: { desktop: 3800, mobile: 1700 },
+  TILE_OPACITY: 0.5,
+  CELL_BUDGET: { desktop: 6800, mobile: 2600 },
 
-  SHOWCASE_STAGGER: 300,   // пауза между появлением фото, мс
-  SHOWCASE_GROW:    900,   // как долго одно фото плавно выплывает, мс
-  SHOWCASE_HOLD:    700,   // пауза после последнего фото перед сборкой, мс
-  SHOWCASE_SIZE:    0.32,  // размер фото на показе (доля от меньшей стороны экрана)
-  ASSEMBLE_MS: 2300,       // разгон выпуска кусочков (чем дальше — тем быстрее)
-  PIECE_MS:    900,        // длительность полёта одного кусочка
+  SHOWCASE_STAGGER: 300, SHOWCASE_GROW: 900, SHOWCASE_HOLD: 650, SHOWCASE_SIZE: 0.32,
+  ASSEMBLE_MS: 2300, PIECE_MS: 900,
 
-  // фон в стиле «день → закат», под цвет твоих фото неба
-  BG_STOPS: [
-    [0.00, "#2a3f72"],
-    [0.34, "#5d5188"],
-    [0.58, "#a6627e"],
-    [0.78, "#e08a63"],
-    [1.00, "#ffc88c"]
-  ]
+  CORE_R: 0.80,   // внутри — плотный портрет
+  FRAY_R: 1.28,   // до сюда края рассыпаются отдельными фото
+  FRAY_MAX: { desktop: 2200, mobile: 900 },
+
+  AMBIENT_N: { desktop: 210, mobile: 90 },  // фото-поток по всей странице (сзади)
+  FALL_N:    { desktop: 64,  mobile: 28 },  // падающие фото-оверлей (сверху)
+
+  BG_STOPS: [[0.00,"#2a3f72"],[0.34,"#5d5188"],[0.58,"#a6627e"],[0.78,"#e08a63"],[1.00,"#ffc88c"]]
 };
 /* =======================  КОНЕЦ НАСТРОЕК  ============================== */
 
 var DATA = window.MOSAIC_DATA || {tiles:[],target:""};
 var RM = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
-var cv = document.getElementById("scene");
-var ctx = cv.getContext("2d");
-var capWrap = document.getElementById("caption");
-var capH = document.getElementById("capH");
-var capP = document.getElementById("capP");
-var replayBtn = document.getElementById("replay");
-var loader = document.getElementById("loader");
+var cv=document.getElementById("scene"), ctx=cv.getContext("2d");
+var capWrap=document.getElementById("caption"), capH=document.getElementById("capH"),
+    capP=document.getElementById("capP"), replayBtn=document.getElementById("replay"),
+    loader=document.getElementById("loader");
 
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-capH.innerHTML = CONFIG.HEADLINE.split("\n").map(esc).join("<br>");
-capP.textContent = CONFIG.SUBLINE;
+capH.innerHTML=CONFIG.HEADLINE.split("\n").map(esc).join("<br>");
+capP.textContent=CONFIG.SUBLINE;
 
-var dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-var W=0, H=0;
-function isMobile(){ return Math.min(window.innerWidth, window.innerHeight) < 620; }
+var dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1)), W=0,H=0;
+function isMobile(){ return Math.min(window.innerWidth,window.innerHeight)<620; }
+function pickN(o){ return isMobile()?o.mobile:o.desktop; }
 
-/* ---------- утилиты ---------- */
-function easeOutCubic(t){ return 1 - Math.pow(1-t, 3); }
-function easeInOutCubic(t){ return t<0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2,3)/2; }
-function rnd(a,b){ return a + Math.random()*(b-a); }
+function easeOutCubic(t){ return 1-Math.pow(1-t,3); }
+function easeInOutCubic(t){ return t<0.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2; }
+function rnd(a,b){ return a+Math.random()*(b-a); }
 function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
 function loadImg(src){ return new Promise(function(res,rej){ var im=new Image(); im.onload=function(){res(im);}; im.onerror=rej; im.src=src; }); }
-function avgColor(img){
-  var c=document.createElement("canvas"); c.width=c.height=8;
-  var x=c.getContext("2d"); x.drawImage(img,0,0,8,8);
-  var d=x.getImageData(0,0,8,8).data, r=0,g=0,b=0,n=64;
-  for(var i=0;i<d.length;i+=4){ r+=d[i]; g+=d[i+1]; b+=d[i+2]; }
-  return [r/n, g/n, b/n];
-}
+function avgColor(img){ var c=document.createElement("canvas");c.width=c.height=8;var x=c.getContext("2d");x.drawImage(img,0,0,8,8);
+  var d=x.getImageData(0,0,8,8).data,r=0,g=0,b=0;for(var i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2];}return [r/64,g/64,b/64]; }
 
 /* ---------- состояние ---------- */
-var tiles=[], tileAvg=[], targetImg=null;
-var cols=0, rows=0, cell=0, gridX=0, gridY=0, mW=0, mH=0;
-var atlas=null, ac=0;
-// по ячейкам
-var Ncol=null,Nrow=null,Ti=null,Ccx=null,Ccy=null,Sx=null,Sy=null,Rot=null,Scl=null,Del=null,Keep=null,nCells=0;
-// показ фото (16)
+var tiles=[],tileAvg=[],targetImg=null;
+var cols=0,rows=0,cell=0,gridX=0,gridY=0,mW=0,mH=0;
+var atlas=null,core=null,ac=0;
+var Ncol,Nrow,Ti,Tx,Ty,Sx,Sy,Rot,Scl,Del,Typ,FRot,FAlpha,nCells=0; // Typ: 0 drop,1 core,2 fray
+var frayList=[];
 var anchX=[],anchY=[],appearAt=[],rotBase=[],showLong=0,driftAmp=0;
-// тайминги
-var ASSEMBLE_START=0, assembleDur=0, settleAt=0;
-var stars=[], bgGrad=null;
-var raf=null, startT=null, captionShown=false, settled=false;
+var amb=[], fall=[];
+var ASSEMBLE_START=0,assembleDur=0,settleAt=0;
+var stars=[],bgGrad=null;
+var raf=null,startT=null,lastNow=0,captionShown=false,settled=false;
 
 /* ---------- фон ---------- */
-function makeStars(){
-  // на закатном небе — лишь несколько первых звёзд повыше
-  stars=[]; var n=clamp(Math.round((W*H)/(20000*dpr)),20,120);
-  for(var i=0;i<n;i++) stars.push({x:Math.random()*W,y:Math.random()*H*0.46,r:rnd(0.4,1.3)*dpr,a:rnd(0.15,0.6),tw:rnd(0.5,1.6),ph:rnd(0,6.28)});
-}
-function makeBg(){
-  bgGrad=ctx.createLinearGradient(0,0,0,H);
-  var st=CONFIG.BG_STOPS||[[0,"#2a3f72"],[1,"#ffc88c"]];
-  for(var i=0;i<st.length;i++) bgGrad.addColorStop(st[i][0], st[i][1]);
-}
+function makeStars(){ stars=[]; var n=clamp(Math.round((W*H)/(20000*dpr)),20,120);
+  for(var i=0;i<n;i++) stars.push({x:Math.random()*W,y:Math.random()*H*0.46,r:rnd(0.4,1.3)*dpr,a:rnd(0.15,0.6),tw:rnd(0.5,1.6),ph:rnd(0,6.28)}); }
+function makeBg(){ bgGrad=ctx.createLinearGradient(0,0,0,H); var st=CONFIG.BG_STOPS;
+  for(var i=0;i<st.length;i++) bgGrad.addColorStop(st[i][0],st[i][1]); }
 function drawBg(t){
   ctx.fillStyle=bgGrad; ctx.fillRect(0,0,W,H);
-  // тёплое сияние у горизонта (солнце на закате)
-  var sg=ctx.createRadialGradient(W*0.5,H*0.96,0, W*0.5,H*0.96,H*0.66);
-  sg.addColorStop(0,"rgba(255,196,140,0.30)");
-  sg.addColorStop(1,"rgba(255,196,140,0)");
+  var sg=ctx.createRadialGradient(W*0.5,H*0.96,0,W*0.5,H*0.96,H*0.66);
+  sg.addColorStop(0,"rgba(255,196,140,0.30)"); sg.addColorStop(1,"rgba(255,196,140,0)");
   ctx.fillStyle=sg; ctx.fillRect(0,0,W,H);
   for(var i=0;i<stars.length;i++){ var s=stars[i];
     var a=RM?s.a*0.7:s.a*(0.55+0.45*Math.sin(t*0.001*s.tw+s.ph));
-    ctx.globalAlpha=clamp(a,0,1); ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,6.2832); ctx.fillStyle="#fff2e0"; ctx.fill();
-  }
+    ctx.globalAlpha=clamp(a,0,1); ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,6.2832); ctx.fillStyle="#fff2e0"; ctx.fill(); }
   ctx.globalAlpha=1;
 }
 
-/* ---------- сетка + атлас ---------- */
+/* ---------- сетка + атлас + ядро ---------- */
 function computeGrid(){
-  var aspect=targetImg.width/targetImg.height;
-  var budget=isMobile()?CONFIG.CELL_BUDGET.mobile:CONFIG.CELL_BUDGET.desktop;
-  rows=clamp(Math.round(Math.sqrt(budget/aspect)),24,110);
-  cols=clamp(Math.round(rows*aspect),18,110);
-  var cssW=W/dpr, cssH=H/dpr;
-  cell=Math.max(Math.floor(Math.min(cssW*0.92/cols, cssH*0.80/rows)),3);
+  var aspect=targetImg.width/targetImg.height, budget=pickN(CONFIG.CELL_BUDGET);
+  rows=clamp(Math.round(Math.sqrt(budget/aspect)),24,150);
+  cols=clamp(Math.round(rows*aspect),18,150);
+  var cssW=W/dpr,cssH=H/dpr;
+  cell=Math.max(Math.floor(Math.min(cssW*0.92/cols,cssH*0.80/rows)),3);
   mW=cell*cols*dpr; mH=cell*rows*dpr;
   gridX=Math.round((W-mW)/2);
-  gridY=Math.round((H*0.80-mH)/2 + H*0.02);
+  gridY=Math.round((H*0.80-mH)/2+H*0.02);
   if(gridY<H*0.03) gridY=Math.round(H*0.03);
 }
-function sampleTargetColors(){
-  var c=document.createElement("canvas"); c.width=cols; c.height=rows;
-  var x=c.getContext("2d"); x.drawImage(targetImg,0,0,cols,rows);
-  return x.getImageData(0,0,cols,rows).data;
-}
-function pickTile(r,g,b){
-  var best=[];
-  for(var i=0;i<tileAvg.length;i++){ var t=tileAvg[i];
-    best.push([(t[0]-r)*(t[0]-r)+(t[1]-g)*(t[1]-g)+(t[2]-b)*(t[2]-b), i]); }
-  best.sort(function(a,b){return a[0]-b[0];});
-  return best[Math.floor(Math.random()*Math.min(3,best.length))][1];
-}
+function sampleTargetColors(){ var c=document.createElement("canvas");c.width=cols;c.height=rows;
+  var x=c.getContext("2d");x.drawImage(targetImg,0,0,cols,rows);return x.getImageData(0,0,cols,rows).data; }
+function pickTile(r,g,b){ var best=[];
+  for(var i=0;i<tileAvg.length;i++){ var t=tileAvg[i]; best.push([(t[0]-r)*(t[0]-r)+(t[1]-g)*(t[1]-g)+(t[2]-b)*(t[2]-b),i]); }
+  best.sort(function(a,b){return a[0]-b[0];}); return best[Math.floor(Math.random()*Math.min(3,best.length))][1]; }
+
 function buildAtlas(){
   var data=sampleTargetColors();
-  ac=clamp(Math.round(cell*dpr),6,26);
+  ac=clamp(Math.round(cell*dpr),5,24);
   atlas=document.createElement("canvas"); atlas.width=cols*ac; atlas.height=rows*ac;
   var ax=atlas.getContext("2d");
   nCells=cols*rows;
-  Ncol=new Int16Array(nCells); Nrow=new Int16Array(nCells); Ti=new Int16Array(nCells);
-  Ccx=new Float32Array(nCells); Ccy=new Float32Array(nCells);
-  Sx=new Float32Array(nCells); Sy=new Float32Array(nCells);
-  Rot=new Float32Array(nCells); Scl=new Float32Array(nCells); Del=new Float32Array(nCells);
-  Keep=new Uint8Array(nCells);
-
-  var aw=atlas.width, ah=atlas.height, cx0=aw/2, cy0=ah/2;
-  var R=Math.max(aw,ah)/2, outerR=R*1.12;     // граница, за которой край полностью растворён
-  var op=CONFIG.TILE_OPACITY, idx=0;
+  Ncol=new Int16Array(nCells);Nrow=new Int16Array(nCells);Ti=new Int16Array(nCells);
+  Tx=new Float32Array(nCells);Ty=new Float32Array(nCells);
+  Sx=new Float32Array(nCells);Sy=new Float32Array(nCells);
+  Rot=new Float32Array(nCells);Scl=new Float32Array(nCells);Del=new Float32Array(nCells);
+  Typ=new Uint8Array(nCells);FRot=new Float32Array(nCells);FAlpha=new Float32Array(nCells);
+  frayList=[];
+  var op=CONFIG.TILE_OPACITY, idx=0, pd=cell*dpr;
+  var CR=CONFIG.CORE_R, FR=CONFIG.FRAY_R;
   for(var ry=0;ry<rows;ry++){ for(var rx=0;rx<cols;rx++){
     var p=(ry*cols+rx)*4, r=data[p],g=data[p+1],b=data[p+2];
     var ti=pickTile(r,g,b), dx=rx*ac, dy=ry*ac;
     ax.globalAlpha=1; ax.fillStyle="rgb("+(r|0)+","+(g|0)+","+(b|0)+")"; ax.fillRect(dx,dy,ac,ac);
     ax.globalAlpha=op; ax.drawImage(tiles[ti],0,0,tiles[ti].width,tiles[ti].height,dx,dy,ac,ac); ax.globalAlpha=1;
     Ncol[idx]=rx; Nrow[idx]=ry; Ti[idx]=ti;
-    Ccx[idx]=gridX+rx*cell*dpr+cell*dpr/2; Ccy[idx]=gridY+ry*cell*dpr+cell*dpr/2;
-    // дальние (угловые) кусочки не летают — они всё равно растворены маской
-    var adx=(rx+0.5)*ac-cx0, ady=(ry+0.5)*ac-cy0;
-    Keep[idx]= (Math.sqrt(adx*adx+ady*ady) <= outerR) ? 1 : 0;
+    var cx=gridX+rx*cell*dpr+cell*dpr/2, cy=gridY+ry*cell*dpr+cell*dpr/2;
+    // нормированный «радиус» ячейки (1.0 = середина края, ~1.41 = угол)
+    var nx=(rx+0.5)/cols-0.5, ny=(ry+0.5)/rows-0.5, dn=2*Math.sqrt(nx*nx+ny*ny);
+    if(dn<=CR){ Typ[idx]=1; Tx[idx]=cx; Ty[idx]=cy; FRot[idx]=0; FAlpha[idx]=1; }
+    else if(dn<=FR){
+      var ef=(dn-CR)/(FR-CR);                 // 0..1 к краю
+      var keep = Math.random() < (1-Math.pow(ef,1.25)); // фото редеют порядком
+      if(keep){
+        Typ[idx]=2;
+        var jit=ef*pd*2.4;
+        Tx[idx]=cx+rnd(-1,1)*jit; Ty[idx]=cy+rnd(-1,1)*jit;
+        FRot[idx]=rnd(-0.55,0.55)*ef;
+        FAlpha[idx]=clamp(1-ef*0.7,0.25,1);
+        frayList.push(idx);
+      } else Typ[idx]=0;
+    } else Typ[idx]=0;
     idx++;
   }}
+  // ограничим число «рассыпных» кусочков
+  var maxF=pickN(CONFIG.FRAY_MAX);
+  if(frayList.length>maxF){
+    for(var i=frayList.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var tmp=frayList[i];frayList[i]=frayList[j];frayList[j]=tmp; }
+    for(var i=maxF;i<frayList.length;i++) Typ[frayList[i]]=0;
+    frayList.length=maxF;
+  }
 
-  // фейд-переход: края мозаики плавно растворяются в ночном фоне (эллипс-маска)
-  ax.globalCompositeOperation="destination-in";
-  var grad=ax.createRadialGradient(cx0,cy0,R*0.50, cx0,cy0,outerR);
-  grad.addColorStop(0,"rgba(0,0,0,1)");
-  grad.addColorStop(0.66,"rgba(0,0,0,0.96)");
-  grad.addColorStop(1,"rgba(0,0,0,0)");
-  ax.fillStyle=grad; ax.fillRect(0,0,aw,ah);
-  ax.globalCompositeOperation="source-over";
+  // ядро портрета: атлас с мягким эллипс-краем (отдельный canvas)
+  core=document.createElement("canvas"); core.width=atlas.width; core.height=atlas.height;
+  var cc=core.getContext("2d"); cc.drawImage(atlas,0,0);
+  cc.globalCompositeOperation="destination-in";
+  var aw=core.width,ah=core.height,R=Math.max(aw,ah)/2;
+  var g2=cc.createRadialGradient(aw/2,ah/2,R*(CR*0.5), aw/2,ah/2,R*(CR*0.62+0.16));
+  g2.addColorStop(0,"rgba(0,0,0,1)"); g2.addColorStop(0.7,"rgba(0,0,0,0.95)"); g2.addColorStop(1,"rgba(0,0,0,0)");
+  cc.fillStyle=g2; cc.fillRect(0,0,aw,ah); cc.globalCompositeOperation="source-over";
+}
+
+/* ---------- поток фото по странице (сзади) ---------- */
+function makeAmbient(){
+  amb=[]; var n=pickN(CONFIG.AMBIENT_N), cx=W/2, cy=gridY+mH/2, maxd=Math.max(W,H)*0.75;
+  for(var i=0;i<n;i++){
+    // плотнее у портрета, реже к краям; но раскиданы по всей странице
+    var ang=Math.random()*6.2832, rr=Math.pow(Math.random(),0.62)*maxd;
+    var x=cx+Math.cos(ang)*rr, y=cy+Math.sin(ang)*rr*0.9;
+    x=clamp(x,-0.1*W,1.1*W); y=clamp(y,-0.1*H,1.1*H);
+    var df=clamp(rr/maxd,0,1);
+    amb.push({x:x,y:y,s:rnd(0.5,1.1)*Math.min(W,H)*0.06, rot:rnd(-0.5,0.5),
+      a:(0.16+0.5*(1-df)), t:(i%16), ph:rnd(0,6.28), sp:rnd(0.3,1)});
+  }
+}
+function makeFall(){
+  fall=[]; var n=pickN(CONFIG.FALL_N);
+  for(var i=0;i<n;i++) fall.push(newFall(true));
+}
+function newFall(spread){
+  return { x:Math.random()*W, y:spread?Math.random()*H:-rnd(0.05,0.4)*H,
+    s:rnd(0.55,1.25)*Math.min(W,H)*0.07, rot:rnd(0,6.28), vr:rnd(-0.01,0.01),
+    sp:rnd(0.5,1.5)*dpr*(0.6+Math.min(W,H)/1600), a:rnd(0.32,0.6), t:Math.floor(Math.random()*16) };
+}
+
+function blit(src,sx,sy,sw,sh,x,y,w,h,rot,alpha){
+  ctx.save(); ctx.globalAlpha=alpha; ctx.translate(x,y); if(rot) ctx.rotate(rot);
+  ctx.drawImage(src,sx,sy,sw,sh,-w/2,-h/2,w,h); ctx.restore();
+}
+function drawAmbient(t,gA){
+  if(gA<=0.01) return;
+  for(var i=0;i<amb.length;i++){ var a=amb[i];
+    var dx=Math.sin(t*0.00018*a.sp+a.ph)*driftAmp*1.4, dy=Math.cos(t*0.00015*a.sp+a.ph*1.3)*driftAmp*1.4;
+    blit(tiles[a.t],0,0,tiles[a.t].width,tiles[a.t].height, a.x+dx,a.y+dy,a.s,a.s, a.rot+Math.sin(t*0.0002+a.ph)*0.05, a.a*gA);
+  }
+}
+function drawFall(t,gA,dt){
+  if(gA<=0.01) return;
+  for(var i=0;i<fall.length;i++){ var f=fall[i];
+    f.y+=f.sp*(dt/16); f.rot+=f.vr*(dt/16); f.x+=Math.sin(t*0.0005+f.y*0.002)*0.4;
+    if(f.y-f.s>H){ fall[i]=newFall(false); continue; }
+    blit(tiles[f.t],0,0,tiles[f.t].width,tiles[f.t].height, f.x,f.y,f.s,f.s, f.rot, f.a*gA);
+  }
 }
 
 /* ---------- показ фото по одному ---------- */
 function seedShowcase(){
-  anchX=[]; anchY=[]; appearAt=[]; rotBase=[];
-  var cx=W/2, cy=gridY+mH/2, spread=Math.min(W,H)*0.30;
-  showLong=Math.min(W,H)*CONFIG.SHOWCASE_SIZE;
-  driftAmp=Math.min(W,H)*0.018;
-  // порядок появления — перемешать
-  var order=[]; for(var i=0;i<16;i++) order.push(i);
-  for(var i=order.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=order[i]; order[i]=order[j]; order[j]=t; }
-  for(var k=0;k<16;k++){
-    // золотая спираль вокруг центра -> приятный разброс
-    var rr=(k+0.6)/16, ang=k*2.399963;
-    anchX[k]=cx+Math.cos(ang)*spread*Math.sqrt(rr);
-    anchY[k]=cy+Math.sin(ang)*spread*Math.sqrt(rr)*0.92;
-    rotBase[k]=rnd(-0.18,0.18);
-    appearAt[order[k]]=k*CONFIG.SHOWCASE_STAGGER;
-  }
-  ASSEMBLE_START=(16-1)*CONFIG.SHOWCASE_STAGGER + CONFIG.SHOWCASE_GROW + CONFIG.SHOWCASE_HOLD;
-  assembleDur=CONFIG.ASSEMBLE_MS + CONFIG.PIECE_MS + 80;
-  settleAt=ASSEMBLE_START + assembleDur;
+  anchX=[];anchY=[];appearAt=[];rotBase=[];
+  var cx=W/2,cy=gridY+mH/2,spread=Math.min(W,H)*0.30;
+  showLong=Math.min(W,H)*CONFIG.SHOWCASE_SIZE; driftAmp=Math.min(W,H)*0.018;
+  var order=[];for(var i=0;i<16;i++)order.push(i);
+  for(var i=order.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=order[i];order[i]=order[j];order[j]=t;}
+  for(var k=0;k<16;k++){ var rr=(k+0.6)/16,ang=k*2.399963;
+    anchX[k]=cx+Math.cos(ang)*spread*Math.sqrt(rr); anchY[k]=cy+Math.sin(ang)*spread*Math.sqrt(rr)*0.92;
+    rotBase[k]=rnd(-0.18,0.18); appearAt[order[k]]=k*CONFIG.SHOWCASE_STAGGER; }
+  ASSEMBLE_START=(16-1)*CONFIG.SHOWCASE_STAGGER+CONFIG.SHOWCASE_GROW+CONFIG.SHOWCASE_HOLD;
+  assembleDur=CONFIG.ASSEMBLE_MS+CONFIG.PIECE_MS+80; settleAt=ASSEMBLE_START+assembleDur;
 }
-function showcasePos(i,t){
-  var dx=Math.sin(t*0.0004 + i*1.7)*driftAmp;
-  var dy=Math.cos(t*0.00033 + i*1.3)*driftAmp;
-  return [anchX[i]+dx, anchY[i]+dy];
-}
-function drawShowcase(t, gAlpha){
-  for(var i=0;i<16;i++){
-    var ap=t-appearAt[i]; if(ap<=0) continue;
-    var e=easeOutCubic(clamp(ap/CONFIG.SHOWCASE_GROW,0,1));
-    var al=e*gAlpha; if(al<=0.01) continue;
-    var pos=showcasePos(i,t);
-    var sc=0.7+0.3*e;
-    var rot=rotBase[i]+Math.sin(t*0.0003 + i)*0.04;
-    var S=showLong*sc;
-    ctx.save();
-    ctx.globalAlpha=al;
-    ctx.translate(pos[0],pos[1]); ctx.rotate(rot);
+function showcasePos(i,t){ return [anchX[i]+Math.sin(t*0.0004+i*1.7)*driftAmp, anchY[i]+Math.cos(t*0.00033+i*1.3)*driftAmp]; }
+function drawShowcase(t,gA){
+  for(var i=0;i<16;i++){ var ap=t-appearAt[i]; if(ap<=0) continue;
+    var e=easeOutCubic(clamp(ap/CONFIG.SHOWCASE_GROW,0,1)), al=e*gA; if(al<=0.01) continue;
+    var pos=showcasePos(i,t), sc=0.7+0.3*e, rot=rotBase[i]+Math.sin(t*0.0003+i)*0.04, S=showLong*sc;
+    ctx.save(); ctx.globalAlpha=al; ctx.translate(pos[0],pos[1]); ctx.rotate(rot);
     ctx.shadowColor="rgba(0,0,0,0.45)"; ctx.shadowBlur=20*dpr; ctx.shadowOffsetY=6*dpr;
     ctx.drawImage(tiles[i],0,0,tiles[i].width,tiles[i].height,-S/2,-S/2,S,S);
     ctx.shadowColor="transparent"; ctx.shadowBlur=0; ctx.shadowOffsetY=0;
-    ctx.lineWidth=Math.max(1,1.2*dpr); ctx.strokeStyle="rgba(255,255,255,0.16)";
-    ctx.strokeRect(-S/2,-S/2,S,S);
-    ctx.restore();
-  }
+    ctx.lineWidth=Math.max(1,1.2*dpr); ctx.strokeStyle="rgba(255,255,255,0.16)"; ctx.strokeRect(-S/2,-S/2,S,S);
+    ctx.restore(); }
   ctx.globalAlpha=1;
 }
 
-/* ---------- сборка из кусочков ---------- */
+/* ---------- сборка ---------- */
 function seedAssembly(){
-  var cx=W/2, cy=gridY+mH/2;
-  var maxDist=Math.sqrt((mW/2)*(mW/2)+(mH/2)*(mH/2))||1;
-  var jit=showLong*0.42;
-  for(var i=0;i<nCells;i++){
+  var cx=W/2,cy=gridY+mH/2,maxDist=Math.sqrt((mW/2)*(mW/2)+(mH/2)*(mH/2))||1, jit=showLong*0.42;
+  for(var i=0;i<nCells;i++){ if(Typ[i]===0) continue;
     var ti=Ti[i];
-    Sx[i]=anchX[ti]+rnd(-1,1)*jit;
-    Sy[i]=anchY[ti]+rnd(-1,1)*jit;
-    Scl[i]=rnd(2.4,5.0);
-    Rot[i]=rnd(-0.5,0.5);
-    // задержка растёт от центра наружу с ускорением (степень >1 => разгон)
-    var dx=Ccx[i]-cx, dy=Ccy[i]-cy, rank=Math.sqrt(dx*dx+dy*dy)/maxDist;
-    Del[i]=CONFIG.ASSEMBLE_MS*Math.pow(rank,1.7) + rnd(0,90);
+    Sx[i]=anchX[ti]+rnd(-1,1)*jit; Sy[i]=anchY[ti]+rnd(-1,1)*jit;
+    Scl[i]=rnd(2.4,5.0); Rot[i]=rnd(-0.5,0.5);
+    var dx=Tx[i]-cx,dy=Ty[i]-cy,rank=Math.sqrt(dx*dx+dy*dy)/maxDist;
+    Del[i]=CONFIG.ASSEMBLE_MS*Math.pow(rank,1.7)+rnd(0,90);
   }
 }
 function drawAssembly(bt){
-  var pdpr=cell*dpr, half=pdpr/2;
-  for(var i=0;i<nCells;i++){
-    if(!Keep[i]) continue;
-    var pr=(bt-Del[i])/CONFIG.PIECE_MS;
-    if(pr<=0) continue;
-    if(pr>=1){ ctx.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,Ccx[i]-half,Ccy[i]-half,pdpr,pdpr); continue; }
+  var pd=cell*dpr,half=pd/2;
+  for(var i=0;i<nCells;i++){ if(Typ[i]===0) continue;
+    var pr=(bt-Del[i])/CONFIG.PIECE_MS; if(pr<=0) continue;
+    var baseA=(Typ[i]===2)?FAlpha[i]:1;
+    if(pr>=1){ ctx.globalAlpha=baseA; ctx.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,Tx[i]-half,Ty[i]-half,pd,pd); ctx.globalAlpha=1; continue; }
     var e=easeInOutCubic(pr);
-    var x=Sx[i]+(Ccx[i]-Sx[i])*e, y=Sy[i]+(Ccy[i]-Sy[i])*e;
-    var sc=Scl[i]+(1-Scl[i])*e, rot=Rot[i]*(1-e), al=clamp(pr*2,0,1);
-    ctx.save(); ctx.globalAlpha=al;
-    ctx.translate(x,y); ctx.rotate(rot); ctx.scale(sc,sc);
-    ctx.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,-half,-half,pdpr,pdpr);
-    ctx.restore();
+    var x=Sx[i]+(Tx[i]-Sx[i])*e, y=Sy[i]+(Ty[i]-Sy[i])*e, sc=Scl[i]+(1-Scl[i])*e;
+    var rot=Rot[i]*(1-e)+(Typ[i]===2?FRot[i]*e:0), al=clamp(pr*2,0,1)*baseA;
+    ctx.save(); ctx.globalAlpha=al; ctx.translate(x,y); ctx.rotate(rot); ctx.scale(sc,sc);
+    ctx.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,-half,-half,pd,pd); ctx.restore();
   }
   ctx.globalAlpha=1;
 }
 
-function drawSettled(t){
+/* ---------- собранный портрет (ядро + рассыпные края) ---------- */
+function drawPortrait(t){
   var breathe=RM?1:(1+0.005*Math.sin(t*0.0009));
-  var w=mW*breathe, h=mH*breathe, ox=gridX-(w-mW)/2, oy=gridY-(h-mH)/2;
+  var w=mW*breathe,h=mH*breathe,ox=gridX-(w-mW)/2,oy=gridY-(h-mH)/2;
   ctx.imageSmoothingEnabled=true;
-  ctx.drawImage(atlas,0,0,atlas.width,atlas.height,ox,oy,w,h);
+  ctx.drawImage(core,0,0,core.width,core.height,ox,oy,w,h);   // плотное ядро
+  var pd=cell*dpr,half=pd/2;
+  for(var k=0;k<frayList.length;k++){ var i=frayList[k];      // рассыпные края
+    var dx=RM?0:Math.sin(t*0.0003+i)*driftAmp*0.5, dy=RM?0:Math.cos(t*0.00026+i)*driftAmp*0.5;
+    ctx.save(); ctx.globalAlpha=FAlpha[i]; ctx.translate(Tx[i]+dx,Ty[i]+dy); ctx.rotate(FRot[i]);
+    ctx.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,-half,-half,pd,pd); ctx.restore();
+  }
+  ctx.globalAlpha=1;
 }
 
 /* ---------- кадр ---------- */
 function frame(now){
-  if(startT==null) startT=now; var t=now-startT;
+  if(startT==null){ startT=now; lastNow=now; }
+  var t=now-startT, dt=clamp(now-lastNow,0,50); lastNow=now;
   drawBg(now);
+  var atm=clamp((t-ASSEMBLE_START)/1500,0,1);  // поток + падающие проявляются к сборке
+  if(RM) atm=1;
+  drawAmbient(now, atm*0.95);
+
   if(RM){
-    var a=clamp(t/1200,0,1); ctx.globalAlpha=a; drawSettled(t); ctx.globalAlpha=1;
+    var a=clamp(t/1200,0,1); ctx.globalAlpha=a; drawPortrait(t); ctx.globalAlpha=1;
     if(t>1100 && !captionShown) showCaption();
-    raf=requestAnimationFrame(frame); return;
+    drawFall(now, atm, dt); raf=requestAnimationFrame(frame); return;
   }
-  if(t < ASSEMBLE_START){
-    drawShowcase(t, 1);
-  } else if(t < settleAt){
-    var bt=t-ASSEMBLE_START;
-    var sf=clamp(1 - bt/650, 0, 1);   // фото показа плавно гаснут
-    if(sf>0) drawShowcase(t, sf);
-    drawAssembly(bt);
-  } else {
-    settled=true; drawSettled(t);
-    if(!captionShown) showCaption();
-  }
+  if(t<ASSEMBLE_START){ drawShowcase(t,1); }
+  else if(t<settleAt){ var bt=t-ASSEMBLE_START, sf=clamp(1-bt/650,0,1); if(sf>0) drawShowcase(t,sf); drawAssembly(bt); }
+  else { settled=true; drawPortrait(t); if(!captionShown) showCaption(); }
+
+  drawFall(now, atm, dt);  // падающий оверлей — поверх всего
   raf=requestAnimationFrame(frame);
 }
 function showCaption(){ captionShown=true; capWrap.classList.add("show"); replayBtn.classList.add("show"); }
@@ -353,47 +358,34 @@ function showCaption(){ captionShown=true; capWrap.classList.add("show"); replay
 /* ---------- запуск / ресайз ---------- */
 function start(){
   if(raf) cancelAnimationFrame(raf);
-  seedShowcase(); seedAssembly();
+  seedShowcase(); seedAssembly(); makeAmbient(); makeFall();
   startT=null; captionShown=false; settled=false;
   capWrap.classList.remove("show"); replayBtn.classList.remove("show");
   raf=requestAnimationFrame(frame);
 }
 function showStill(){
   if(raf) cancelAnimationFrame(raf);
-  seedShowcase();
-  captionShown=true; settled=true;
-  capWrap.classList.add("show"); replayBtn.classList.add("show");
-  (function idle(now){ drawBg(now); drawSettled(now); raf=requestAnimationFrame(idle); })(performance.now());
+  seedShowcase(); makeAmbient(); makeFall();
+  captionShown=true; settled=true; capWrap.classList.add("show"); replayBtn.classList.add("show");
+  startT=null; lastNow=0;
+  (function idle(now){ if(lastNow===0)lastNow=now; var dt=clamp(now-lastNow,0,50); lastNow=now;
+    drawBg(now); drawAmbient(now,0.95); drawPortrait(now); drawFall(now,1,dt); raf=requestAnimationFrame(idle); })(performance.now());
 }
-function sizeCanvas(){
-  var cssW=window.innerWidth, cssH=window.innerHeight;
-  W=Math.round(cssW*dpr); H=Math.round(cssH*dpr);
-  cv.width=W; cv.height=H; cv.style.width=cssW+"px"; cv.style.height=cssH+"px";
-}
+function sizeCanvas(){ var cssW=window.innerWidth,cssH=window.innerHeight;
+  W=Math.round(cssW*dpr); H=Math.round(cssH*dpr); cv.width=W; cv.height=H; cv.style.width=cssW+"px"; cv.style.height=cssH+"px"; }
 function rebuild(){ sizeCanvas(); makeBg(); makeStars(); if(targetImg){ computeGrid(); buildAtlas(); } }
 
 var rzTimer=null;
-window.addEventListener("resize", function(){
-  if(rzTimer) clearTimeout(rzTimer);
-  rzTimer=setTimeout(function(){ rebuild(); showStill(); }, 200);
-});
+window.addEventListener("resize", function(){ if(rzTimer)clearTimeout(rzTimer); rzTimer=setTimeout(function(){ rebuild(); showStill(); },200); });
 cv.addEventListener("click", function(){ start(); });
 replayBtn.addEventListener("click", function(e){ e.stopPropagation(); start(); });
 
 /* ---------- инициализация ---------- */
-Promise.all([
-  Promise.all((DATA.tiles||[]).map(loadImg)),
-  loadImg(DATA.target)
-]).then(function(res){
+Promise.all([ Promise.all((DATA.tiles||[]).map(loadImg)), loadImg(DATA.target) ]).then(function(res){
   tiles=res[0]; targetImg=res[1]; tileAvg=tiles.map(avgColor);
-  loader.classList.add("hide");
-  rebuild();
-  if(/[?&]still/.test(location.search)) showStill();
-  else start();
-}).catch(function(err){
-  loader.textContent="не удалось загрузить изображения";
-  try{ console.error(err); }catch(e){}
-});
+  loader.classList.add("hide"); rebuild();
+  if(/[?&]still/.test(location.search)) showStill(); else start();
+}).catch(function(err){ loader.textContent="не удалось загрузить изображения"; try{console.error(err);}catch(e){} });
 
 })();
 </script>
