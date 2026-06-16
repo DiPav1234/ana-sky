@@ -67,7 +67,7 @@
    • TILE_OPACITY — насколько видны фото-неба поверх портрета (0.3..0.7).
    • CELL_BUDGET — детализация портрета (число кусочков).
    • Тайминги: SHOWCASE_* (показ фото по одному), ASSEMBLE_MS/PIECE_MS (разгон+сборка).
-   • HALO_N/HALO_EXP — сколько фото рассыпать ВОКРУГ целого фото и как широко (цвет ореола повторяет край фото).
+   • HALO_EXP/HALO_FALLOFF — как широко и насколько плавно фото «осыпается» фотографиями по краям (цвет = как у края фото).
    • AMBIENT_N / FALL_N — поток фото по всей странице / падающий оверлей сверху.
    ======================================================================= */
 var CONFIG = {
@@ -79,9 +79,10 @@ var CONFIG = {
   SHOWCASE_STAGGER: 300, SHOWCASE_GROW: 900, SHOWCASE_HOLD: 650, SHOWCASE_SIZE: 0.32,
   ASSEMBLE_MS: 2300, PIECE_MS: 900,
 
-  EDGE_SOFT: 0.06,    // мягкость самого края фотки (фото остаётся ЦЕЛЫМ)
-  HALO_N: { desktop: 6000, mobile: 2600 }, // сколько фото рассыпать ВОКРУГ (цвет — как у края фото)
-  HALO_EXP: 0.9,      // как широко по странице раскидан ореол (больше = шире)
+  EDGE_SOFT: 0.04,    // мягкость самого края фотки (фото остаётся ЦЕЛЫМ)
+  HALO_EXP: 0.78,     // как далеко тянется хвост ореола (больше = шире)
+  HALO_FALLOFF: 0.17, // густой плавный спад у края (больше = мягче переход, без границы)
+  HALO_CAP: { desktop: 7000, mobile: 3000 },
 
   AMBIENT_N: { desktop: 260, mobile: 110 },  // фото-поток по всей странице (сзади)
   FALL_N:    { desktop: 30,  mobile: 14 },  // падающие фото-оверлей (сверху) — деликатно
@@ -159,13 +160,12 @@ function buildAtlas(){
   ac=clamp(Math.round(cell*dpr),5,24);
   atlas=document.createElement("canvas"); atlas.width=cols*ac; atlas.height=rows*ac;
   var ax=atlas.getContext("2d");
-  var gridN=cols*rows, haloN=pickN(CONFIG.HALO_N);
-  nCells=gridN+haloN;
-  Ncol=new Int16Array(nCells);Nrow=new Int16Array(nCells);Ti=new Int16Array(nCells);
-  Tx=new Float32Array(nCells);Ty=new Float32Array(nCells);
-  Sx=new Float32Array(nCells);Sy=new Float32Array(nCells);
-  Rot=new Float32Array(nCells);Scl=new Float32Array(nCells);Del=new Float32Array(nCells);
-  Typ=new Uint8Array(nCells);FRot=new Float32Array(nCells);FAlpha=new Float32Array(nCells);
+  var gridN=cols*rows, cap=gridN+pickN(CONFIG.HALO_CAP);
+  Ncol=new Int16Array(cap);Nrow=new Int16Array(cap);Ti=new Int16Array(cap);
+  Tx=new Float32Array(cap);Ty=new Float32Array(cap);
+  Sx=new Float32Array(cap);Sy=new Float32Array(cap);
+  Rot=new Float32Array(cap);Scl=new Float32Array(cap);Del=new Float32Array(cap);
+  Typ=new Uint8Array(cap);FRot=new Float32Array(cap);FAlpha=new Float32Array(cap);
   var op=CONFIG.TILE_OPACITY, pd=cell*dpr, half=pd/2, idx=0;
   var EDGE=CONFIG.EDGE_SOFT||0.06;
 
@@ -182,25 +182,27 @@ function buildAtlas(){
     Typ[idx]=1; idx++;
   }}
 
-  // 2) ОРЕОЛ вокруг фото: рассыпанные фото, цвет которых ПОВТОРЯЕТ ближайшую часть фото,
-  //    редеют наружу по всей странице. САМО фото не трогаем.
-  var EXP=CONFIG.HALO_EXP||0.7;
-  for(var hh=0;hh<haloN;hh++){
-    var nx=rnd(-EXP,1+EXP), ny=rnd(-EXP,1+EXP);
-    var ox=Math.max(0,-nx,nx-1), oy=Math.max(0,-ny,ny-1);
-    var od=Math.min(1, Math.sqrt(ox*ox+oy*oy)/EXP);   // 0 — у края фото, 1 — далеко
-    var inside=(ox===0 && oy===0);
-    Typ[idx]=0;
-    if(inside){ if(Math.random()>=0.05){ idx++; continue; } od=0; }       // внутри фото почти не нужен
-    else if(Math.random() >= Math.pow(1-od,1.15)){ idx++; continue; }       // редеют наружу (шире)
-    var u=clamp(nx,0,1), v=clamp(ny,0,1);
-    var gcc=clamp(Math.round(u*(cols-1)),0,cols-1), gcr=clamp(Math.round(v*(rows-1)),0,rows-1);
-    Ncol[idx]=gcc; Nrow[idx]=gcr; Ti[idx]=Ti[gcr*cols+gcc];   // цвет = как у этой части фото
-    Tx[idx]=clamp(gridX+nx*mW,-0.03*W,1.03*W); Ty[idx]=clamp(gridY+ny*mH,-0.03*H,1.03*H);
-    FRot[idx]=rnd(-0.8,0.8);
-    FAlpha[idx]=clamp((1-od)*0.92,0.1,0.92);
-    Typ[idx]=2; idx++;
+  // 2) ОРЕОЛ: ПРОДОЛЖАЕМ сетку наружу с той же плотностью у края и плавно (экспонентой)
+  //    редеем — никакого резкого прямоугольника. Цвет берём из ближайшей части фото (clamp).
+  var EXP=CONFIG.HALO_EXP||0.75;
+  var FO=Math.max(3, cols*(CONFIG.HALO_FALLOFF||0.17));   // глубина «густого» спада, в ячейках
+  var mC=Math.round(cols*EXP), mR=Math.round(rows*EXP);
+  for(var ry2=-mR; ry2<rows+mR && idx<cap; ry2++){
+    for(var rx2=-mC; rx2<cols+mC && idx<cap; rx2++){
+      if(rx2>=0 && rx2<cols && ry2>=0 && ry2<rows) continue;   // это само фото — пропускаем
+      var dxo=Math.max(0,-rx2,rx2-(cols-1)), dyo=Math.max(0,-ry2,ry2-(rows-1));
+      var dc=Math.sqrt(dxo*dxo+dyo*dyo), keepP=Math.exp(-dc/FO);
+      if(Math.random()>=keepP) continue;                       // у края keepP≈1 (густо), дальше тает
+      var gcc=clamp(rx2,0,cols-1), gcr=clamp(ry2,0,rows-1);
+      Ncol[idx]=gcc; Nrow[idx]=gcr; Ti[idx]=Ti[gcr*cols+gcc];  // цвет = как у этой части фото
+      var jf=pd*(0.4+dc*0.06);
+      Tx[idx]=gridX+rx2*pd+half+rnd(-1,1)*jf; Ty[idx]=gridY+ry2*pd+half+rnd(-1,1)*jf;
+      FRot[idx]=rnd(-0.5,0.5)*Math.min(1,dc/8);
+      FAlpha[idx]=clamp(keepP*1.05,0.12,1);
+      Typ[idx]=2; idx++;
+    }
   }
+  nCells=idx;
 
   // запекаем финальный статичный кадр (1:1 с последним кадром сборки) — на весь экран
   finalX0=0; finalY0=0;
