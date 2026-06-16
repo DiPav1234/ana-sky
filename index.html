@@ -79,10 +79,10 @@ var CONFIG = {
   SHOWCASE_STAGGER: 300, SHOWCASE_GROW: 900, SHOWCASE_HOLD: 650, SHOWCASE_SIZE: 0.32,
   ASSEMBLE_MS: 2300, PIECE_MS: 900,
 
-  EDGE_SOFT: 0.04,    // мягкость самого края фотки (фото остаётся ЦЕЛЫМ)
-  HALO_EXP: 0.78,     // как далеко тянется хвост ореола (больше = шире)
-  HALO_FALLOFF: 0.17, // густой плавный спад у края (больше = мягче переход, без границы)
-  HALO_CAP: { desktop: 7000, mobile: 3000 },
+  EDGE_SOFT: 0.07,    // мягкость самого края фотки (фото остаётся ЦЕЛЫМ, край мягко гаснет)
+  HALO_EXP: 0.85,     // как далеко тянется хвост ореола (больше = шире)
+  HALO_FALLOFF: 0.24, // густой плавный спад у края (больше = мягче переход, без границы)
+  HALO_CAP: { desktop: 8500, mobile: 3800 },
 
   AMBIENT_N: { desktop: 260, mobile: 110 },  // фото-поток по всей странице (сзади)
   FALL_N:    { desktop: 30,  mobile: 14 },  // падающие фото-оверлей (сверху) — деликатно
@@ -185,13 +185,18 @@ function buildAtlas(){
   // 2) ОРЕОЛ: ПРОДОЛЖАЕМ сетку наружу с той же плотностью у края и плавно (экспонентой)
   //    редеем — никакого резкого прямоугольника. Цвет берём из ближайшей части фото (clamp).
   var EXP=CONFIG.HALO_EXP||0.75;
-  var FO=Math.max(3, cols*(CONFIG.HALO_FALLOFF||0.17));   // глубина «густого» спада, в ячейках
+  var FO=Math.max(3, cols*(CONFIG.HALO_FALLOFF||0.24));   // глубина «густого» спада, в ячейках
   var mC=Math.round(cols*EXP), mR=Math.round(rows*EXP);
+  var ccx=(cols-1)/2, ccy=(rows-1)/2;
   for(var ry2=-mR; ry2<rows+mR && idx<cap; ry2++){
     for(var rx2=-mC; rx2<cols+mC && idx<cap; rx2++){
       if(rx2>=0 && rx2<cols && ry2>=0 && ry2<rows) continue;   // это само фото — пропускаем
       var dxo=Math.max(0,-rx2,rx2-(cols-1)), dyo=Math.max(0,-ry2,ry2-(rows-1));
-      var dc=Math.sqrt(dxo*dxo+dyo*dyo), keepP=Math.exp(-dc/FO);
+      var dc=Math.sqrt(dxo*dxo+dyo*dyo);
+      // нерегулярная глубина ореола по направлению => плюмы/клочья, а не ровный прямоугольник
+      var ang=Math.atan2(ry2-ccy, rx2-ccx);
+      var wob=0.45 + 0.55*(0.5+0.5*Math.sin(ang*3.0+0.7)) + 0.35*(0.5+0.5*Math.sin(ang*7.0+2.1));
+      var keepP=Math.exp(-dc/(FO*wob));
       if(Math.random()>=keepP) continue;                       // у края keepP≈1 (густо), дальше тает
       var gcc=clamp(rx2,0,cols-1), gcr=clamp(ry2,0,rows-1);
       Ncol[idx]=gcc; Nrow[idx]=gcr; Ti[idx]=Ti[gcr*cols+gcc];  // цвет = как у этой части фото
