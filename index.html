@@ -111,7 +111,7 @@ function avgColor(img){ var c=document.createElement("canvas");c.width=c.height=
   var d=x.getImageData(0,0,8,8).data,r=0,g=0,b=0;for(var i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2];}return [r/64,g/64,b/64]; }
 
 /* ---------- состояние ---------- */
-var tiles=[],tileAvg=[],targetImg=null;
+var tiles=[],bigTiles=[],tileAvg=[],targetImg=null;
 var cols=0,rows=0,cell=0,gridX=0,gridY=0,mW=0,mH=0;
 var atlas=null,finalCv=null,finalX0=0,finalY0=0,ac=0;
 var Ncol,Nrow,Ti,Tx,Ty,Sx,Sy,Rot,Scl,Del,Typ,FRot,FAlpha,nCells=0; // Typ: 0 drop,1 core,2 fray
@@ -285,7 +285,8 @@ function drawShowcase(t,gA){
     var pos=showcasePos(i,t), sc=0.7+0.3*e, rot=rotBase[i]+Math.sin(t*0.0003+i)*0.04, S=showLong*sc;
     ctx.save(); ctx.globalAlpha=al; ctx.translate(pos[0],pos[1]); ctx.rotate(rot);
     ctx.shadowColor="rgba(0,0,0,0.45)"; ctx.shadowBlur=20*dpr; ctx.shadowOffsetY=6*dpr;
-    ctx.drawImage(tiles[i],0,0,tiles[i].width,tiles[i].height,-S/2,-S/2,S,S);
+    var bi=bigTiles[i]||tiles[i];
+    ctx.drawImage(bi,0,0,bi.width,bi.height,-S/2,-S/2,S,S);
     ctx.shadowColor="transparent"; ctx.shadowBlur=0; ctx.shadowOffsetY=0;
     ctx.lineWidth=Math.max(1,1.2*dpr); ctx.strokeStyle="rgba(255,255,255,0.16)"; ctx.strokeRect(-S/2,-S/2,S,S);
     ctx.restore(); }
@@ -377,8 +378,12 @@ cv.addEventListener("click", function(){ start(); });
 replayBtn.addEventListener("click", function(e){ e.stopPropagation(); start(); });
 
 /* ---------- инициализация ---------- */
-Promise.all([ Promise.all((DATA.tiles||[]).map(loadImg)), loadImg(DATA.target) ]).then(function(res){
-  tiles=res[0]; targetImg=res[1]; tileAvg=tiles.map(avgColor);
+Promise.all([
+  Promise.all((DATA.tiles||[]).map(loadImg)),
+  Promise.all((DATA.big||DATA.tiles||[]).map(loadImg)),
+  loadImg(DATA.target)
+]).then(function(res){
+  tiles=res[0]; bigTiles=res[1]; targetImg=res[2]; tileAvg=tiles.map(avgColor);
   loader.classList.add("hide"); rebuild();
   if(/[?&]still/.test(location.search)) showStill(); else start();
 }).catch(function(err){ loader.textContent="не удалось загрузить изображения"; try{console.error(err);}catch(e){} });
