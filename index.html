@@ -77,7 +77,7 @@
    ======================================================================= */
 var CONFIG = {
   HEADLINE: "В каждом закате, что нежно ловлю,\nв каждом мгновенье — тебя лишь люблю.",
-  SUBLINE:  "Анечка ❤",
+  SUBLINE:  "",
   TILE_OPACITY: 0.5,
   CELL_BUDGET: { desktop: 6800, mobile: 2600 },
 
@@ -111,7 +111,7 @@ var replayBtn=document.getElementById("replay"), loader=document.getElementById(
 var capWrap=document.getElementById("caption"), capH=document.getElementById("capH"), capP=document.getElementById("capP");
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 capH.innerHTML=CONFIG.HEADLINE.split("\n").map(esc).join("<br>");
-capP.textContent=CONFIG.SUBLINE;
+capP.textContent=CONFIG.SUBLINE; if(!CONFIG.SUBLINE) capP.style.display="none";
 
 var dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1)), W=0,H=0;
 function isMobile(){ return Math.min(window.innerWidth,window.innerHeight)<620; }
