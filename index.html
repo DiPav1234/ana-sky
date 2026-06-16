@@ -84,8 +84,8 @@ var CONFIG = {
   FRAY_R: 1.40,    // докуда края рассыпаются фото (с нахлёстом на спад ядра — без зазора)
   FRAY_MAX: { desktop: 3000, mobile: 1200 },
 
-  AMBIENT_N: { desktop: 210, mobile: 90 },  // фото-поток по всей странице (сзади)
-  FALL_N:    { desktop: 64,  mobile: 28 },  // падающие фото-оверлей (сверху)
+  AMBIENT_N: { desktop: 200, mobile: 90 },  // фото-поток по всей странице (сзади)
+  FALL_N:    { desktop: 30,  mobile: 14 },  // падающие фото-оверлей (сверху) — деликатно
 
   BG_STOPS: [[0.00,"#2a3f72"],[0.34,"#5d5188"],[0.58,"#a6627e"],[0.78,"#e08a63"],[1.00,"#ffc88c"]]
 };
@@ -220,8 +220,8 @@ function makeAmbient(){
     var x=cx+Math.cos(ang)*rr, y=cy+Math.sin(ang)*rr*0.9;
     x=clamp(x,-0.1*W,1.1*W); y=clamp(y,-0.1*H,1.1*H);
     var df=clamp(rr/maxd,0,1);
-    amb.push({x:x,y:y,s:rnd(0.5,1.1)*Math.min(W,H)*0.06, rot:rnd(-0.5,0.5),
-      a:(0.16+0.5*(1-df)), t:(i%16), ph:rnd(0,6.28), sp:rnd(0.3,1)});
+    amb.push({x:x,y:y,s:rnd(0.5,1.0)*Math.min(W,H)*0.042, rot:rnd(-0.5,0.5),
+      a:(0.1+0.32*(1-df)), t:(i%16), ph:rnd(0,6.28), sp:rnd(0.3,1)});
   }
 }
 function makeFall(){
@@ -230,8 +230,8 @@ function makeFall(){
 }
 function newFall(spread){
   return { x:Math.random()*W, y:spread?Math.random()*H:-rnd(0.05,0.4)*H,
-    s:rnd(0.55,1.25)*Math.min(W,H)*0.07, rot:rnd(0,6.28), vr:rnd(-0.01,0.01),
-    sp:rnd(0.5,1.5)*dpr*(0.6+Math.min(W,H)/1600), a:rnd(0.32,0.6), t:Math.floor(Math.random()*16) };
+    s:rnd(0.5,1.0)*Math.min(W,H)*0.036, rot:rnd(0,6.28), vr:rnd(-0.008,0.008),
+    sp:rnd(0.4,1.1)*dpr*(0.6+Math.min(W,H)/1600), a:rnd(0.12,0.3), t:Math.floor(Math.random()*16) };
 }
 
 function blit(src,sx,sy,sw,sh,x,y,w,h,rot,alpha){
