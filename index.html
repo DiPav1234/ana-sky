@@ -67,7 +67,7 @@
    • TILE_OPACITY — насколько видны фото-неба поверх портрета (0.3..0.7).
    • CELL_BUDGET — детализация портрета (число кусочков).
    • Тайминги: SHOWCASE_* (показ фото по одному), ASSEMBLE_MS/PIECE_MS (разгон+сборка).
-   • CORE_R/FRAY_R — где портрет плотный и где края «рассыпаются» фотографиями.
+   • HALO_N/HALO_EXP — сколько фото рассыпать ВОКРУГ целого фото и как широко (цвет ореола повторяет край фото).
    • AMBIENT_N / FALL_N — поток фото по всей странице / падающий оверлей сверху.
    ======================================================================= */
 var CONFIG = {
@@ -79,11 +79,9 @@ var CONFIG = {
   SHOWCASE_STAGGER: 300, SHOWCASE_GROW: 900, SHOWCASE_HOLD: 650, SHOWCASE_SIZE: 0.32,
   ASSEMBLE_MS: 2300, PIECE_MS: 900,
 
-  CORE_R: 0.46,    // маленькое плотное ядро (её лицо/торс), остальное разлетается
-  FRAY_R: 1.46,
-  SPREAD: 0.52,    // разлёт наружу (доля меньшей стороны экрана) — шире по странице
-  CHAOS:  0.17,    // хаотичный случайный разброс (доля меньшей стороны)
-  FRAY_MAX: { desktop: 5200, mobile: 2200 },
+  EDGE_SOFT: 0.06,    // мягкость самого края фотки (фото остаётся ЦЕЛЫМ)
+  HALO_N: { desktop: 6000, mobile: 2600 }, // сколько фото рассыпать ВОКРУГ (цвет — как у края фото)
+  HALO_EXP: 0.9,      // как широко по странице раскидан ореол (больше = шире)
 
   AMBIENT_N: { desktop: 260, mobile: 110 },  // фото-поток по всей странице (сзади)
   FALL_N:    { desktop: 30,  mobile: 14 },  // падающие фото-оверлей (сверху) — деликатно
@@ -161,63 +159,55 @@ function buildAtlas(){
   ac=clamp(Math.round(cell*dpr),5,24);
   atlas=document.createElement("canvas"); atlas.width=cols*ac; atlas.height=rows*ac;
   var ax=atlas.getContext("2d");
-  nCells=cols*rows;
+  var gridN=cols*rows, haloN=pickN(CONFIG.HALO_N);
+  nCells=gridN+haloN;
   Ncol=new Int16Array(nCells);Nrow=new Int16Array(nCells);Ti=new Int16Array(nCells);
   Tx=new Float32Array(nCells);Ty=new Float32Array(nCells);
   Sx=new Float32Array(nCells);Sy=new Float32Array(nCells);
   Rot=new Float32Array(nCells);Scl=new Float32Array(nCells);Del=new Float32Array(nCells);
   Typ=new Uint8Array(nCells);FRot=new Float32Array(nCells);FAlpha=new Float32Array(nCells);
-  frayList=[];
-  var op=CONFIG.TILE_OPACITY, idx=0, pd=cell*dpr;
-  var CR=CONFIG.CORE_R, FR=CONFIG.FRAY_R;
-  var pcx=gridX+mW/2, pcy=gridY+mH/2, mn=Math.min(W,H);   // центр портрета — от него разлёт
-  var SPREAD=(CONFIG.SPREAD||0.4)*mn, CHAOS=(CONFIG.CHAOS||0.1)*mn;
+  var op=CONFIG.TILE_OPACITY, pd=cell*dpr, half=pd/2, idx=0;
+  var EDGE=CONFIG.EDGE_SOFT||0.06;
+
+  // 1) ЦЕЛАЯ ЧЁТКАЯ ФОТКА — плотная сетка, ничего не растаскиваем
   for(var ry=0;ry<rows;ry++){ for(var rx=0;rx<cols;rx++){
     var p=(ry*cols+rx)*4, r=data[p],g=data[p+1],b=data[p+2];
     var ti=pickTile(r,g,b), dx=rx*ac, dy=ry*ac;
     ax.globalAlpha=1; ax.fillStyle="rgb("+(r|0)+","+(g|0)+","+(b|0)+")"; ax.fillRect(dx,dy,ac,ac);
     ax.globalAlpha=op; ax.drawImage(tiles[ti],0,0,tiles[ti].width,tiles[ti].height,dx,dy,ac,ac); ax.globalAlpha=1;
     Ncol[idx]=rx; Nrow[idx]=ry; Ti[idx]=ti;
-    var cx=gridX+rx*cell*dpr+cell*dpr/2, cy=gridY+ry*cell*dpr+cell*dpr/2;
-    // нормированный «радиус» ячейки (1.0 = середина края, ~1.41 = угол)
-    var nx=(rx+0.5)/cols-0.5, ny=(ry+0.5)/rows-0.5, dn=2*Math.sqrt(nx*nx+ny*ny);
-    if(dn<=CR){ Typ[idx]=1; Tx[idx]=cx; Ty[idx]=cy; FRot[idx]=0; FAlpha[idx]=1; }
-    else if(dn<=FR){
-      var ef=(dn-CR)/(FR-CR);                 // 0..1 наружу
-      var keep = Math.random() < (1-Math.pow(ef,1.9)); // держим много, но раскидываем ШИРОКО
-      if(keep){
-        Typ[idx]=2;
-        // сильный разлёт наружу от центра + крупный хаотичный разброс => по всей странице
-        var ddx=cx-pcx, ddy=cy-pcy, dl=Math.sqrt(ddx*ddx+ddy*ddy)||1;
-        var push=Math.pow(ef,1.2)*SPREAD, ch=ef*CHAOS;
-        var tx=cx+(ddx/dl)*push+rnd(-1,1)*ch, ty=cy+(ddy/dl)*push+rnd(-1,1)*ch;
-        Tx[idx]=clamp(tx,-0.02*W,1.02*W); Ty[idx]=clamp(ty,-0.02*H,1.02*H);
-        FRot[idx]=rnd(-0.8,0.8)*ef;
-        FAlpha[idx]=clamp(1-ef*0.6,0.16,1);
-        frayList.push(idx);
-      } else Typ[idx]=0;
-    } else Typ[idx]=0;
-    idx++;
+    Tx[idx]=gridX+rx*pd+half; Ty[idx]=gridY+ry*pd+half; FRot[idx]=0;
+    var nxn=(rx+0.5)/cols, nyn=(ry+0.5)/rows, ed=Math.min(nxn,1-nxn,nyn,1-nyn);
+    FAlpha[idx]=clamp(ed/EDGE,0,1);     // фото целое; лишь самый край мягко гаснет
+    Typ[idx]=1; idx++;
   }}
-  // ограничим число «рассыпных» кусочков
-  var maxF=pickN(CONFIG.FRAY_MAX);
-  if(frayList.length>maxF){
-    for(var i=frayList.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var tmp=frayList[i];frayList[i]=frayList[j];frayList[j]=tmp; }
-    for(var i=maxF;i<frayList.length;i++) Typ[frayList[i]]=0;
-    frayList.length=maxF;
+
+  // 2) ОРЕОЛ вокруг фото: рассыпанные фото, цвет которых ПОВТОРЯЕТ ближайшую часть фото,
+  //    редеют наружу по всей странице. САМО фото не трогаем.
+  var EXP=CONFIG.HALO_EXP||0.7;
+  for(var hh=0;hh<haloN;hh++){
+    var nx=rnd(-EXP,1+EXP), ny=rnd(-EXP,1+EXP);
+    var ox=Math.max(0,-nx,nx-1), oy=Math.max(0,-ny,ny-1);
+    var od=Math.min(1, Math.sqrt(ox*ox+oy*oy)/EXP);   // 0 — у края фото, 1 — далеко
+    var inside=(ox===0 && oy===0);
+    Typ[idx]=0;
+    if(inside){ if(Math.random()>=0.05){ idx++; continue; } od=0; }       // внутри фото почти не нужен
+    else if(Math.random() >= Math.pow(1-od,1.15)){ idx++; continue; }       // редеют наружу (шире)
+    var u=clamp(nx,0,1), v=clamp(ny,0,1);
+    var gcc=clamp(Math.round(u*(cols-1)),0,cols-1), gcr=clamp(Math.round(v*(rows-1)),0,rows-1);
+    Ncol[idx]=gcc; Nrow[idx]=gcr; Ti[idx]=Ti[gcr*cols+gcc];   // цвет = как у этой части фото
+    Tx[idx]=clamp(gridX+nx*mW,-0.03*W,1.03*W); Ty[idx]=clamp(gridY+ny*mH,-0.03*H,1.03*H);
+    FRot[idx]=rnd(-0.8,0.8);
+    FAlpha[idx]=clamp((1-od)*0.92,0.1,0.92);
+    Typ[idx]=2; idx++;
   }
 
-  // запекаем ФИНАЛЬНЫЙ собранный кадр в один статичный canvas.
-  // он 1:1 совпадает с последним кадром сборки (те же позиции/поворот/прозрачность),
-  // поэтому переход «сборка -> собрано» без рывка, и он статичен -> ничего не дёргается.
-  var half=pd/2;
+  // запекаем финальный статичный кадр (1:1 с последним кадром сборки) — на весь экран
   finalX0=0; finalY0=0;
-  finalCv=document.createElement("canvas");
-  finalCv.width=W; finalCv.height=H;            // кадр на весь экран — разлёт по всей странице
+  finalCv=document.createElement("canvas"); finalCv.width=W; finalCv.height=H;
   var fc=finalCv.getContext("2d");
   for(var i=0;i<nCells;i++){ if(Typ[i]===0) continue;
-    var rot=(Typ[i]===2)?FRot[i]:0, al=(Typ[i]===2)?FAlpha[i]:1;
-    fc.save(); fc.globalAlpha=al; fc.translate(Tx[i], Ty[i]); if(rot) fc.rotate(rot);
+    fc.save(); fc.globalAlpha=FAlpha[i]; fc.translate(Tx[i],Ty[i]); if(FRot[i]) fc.rotate(FRot[i]);
     fc.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,-half,-half,pd,pd); fc.restore();
   }
 }
@@ -307,15 +297,15 @@ function drawAssembly(bt){
   var pd=cell*dpr,half=pd/2;
   for(var i=0;i<nCells;i++){ if(Typ[i]===0) continue;
     var pr=(bt-Del[i])/CONFIG.PIECE_MS; if(pr<=0) continue;
-    var baseA=(Typ[i]===2)?FAlpha[i]:1;
+    var baseA=FAlpha[i];
     if(pr>=1){
-      if(Typ[i]===2 && FRot[i]) blit(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,Tx[i],Ty[i],pd,pd,FRot[i],baseA);
+      if(FRot[i]) blit(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,Tx[i],Ty[i],pd,pd,FRot[i],baseA);
       else { ctx.globalAlpha=baseA; ctx.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,Tx[i]-half,Ty[i]-half,pd,pd); ctx.globalAlpha=1; }
       continue;
     }
     var e=easeInOutCubic(pr);
     var x=Sx[i]+(Tx[i]-Sx[i])*e, y=Sy[i]+(Ty[i]-Sy[i])*e, sc=Scl[i]+(1-Scl[i])*e;
-    var rot=Rot[i]*(1-e)+(Typ[i]===2?FRot[i]*e:0), al=clamp(pr*2,0,1)*baseA;
+    var rot=Rot[i]*(1-e)+FRot[i]*e, al=clamp(pr*2,0,1)*baseA;
     ctx.save(); ctx.globalAlpha=al; ctx.translate(x,y); ctx.rotate(rot); ctx.scale(sc,sc);
     ctx.drawImage(atlas,Ncol[i]*ac,Nrow[i]*ac,ac,ac,-half,-half,pd,pd); ctx.restore();
   }
